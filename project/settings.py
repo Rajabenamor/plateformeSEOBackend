@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import os 
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,14 +41,24 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
-    'authentication',
+    # 'authentication',
+    'authentication.apps.AuthenticationConfig',
+    'django_rest_passwordreset',
+    'rest_framework.authtoken',
 ]
+
+DJANGO_REST_PASSWORDRESET_TOKEN_CONFIG ={
+    "CLASS" : "django_rest_passwordreset.tokens.RandomStringTokenGenerator",
+    "OPTIONS":{
+        "min_length": 20,
+        "max_length": 40,
+    }
+}
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -59,7 +71,7 @@ ROOT_URLCONF = 'project.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'templates')], #introducing the folder templates to django
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -129,11 +141,43 @@ STATIC_URL = 'static/'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    )
+    ),
+    #tells Django exactly how to "read" the JSON you are sending from Next.js.
+    'DEFAULT_PARSER_CLASSES': (
+        'rest_framework.parsers.JSONParser',
+
+    ),
 }
+
+
+FRONTEND_URL ="http://localhost:3000"
 
 CORS_ALLOWED_ORIGINS=[
     "http://localhost:3000",
 ]
+
 #Authorize django to speak with next.js
 CORS_ALLOW_ALL_ORIGINS = True
+
+
+#token expiration time : 30 minutes
+DJANGO_REST_MULTITOKENAUTH_RESET_TOKEN_EXPIRY_TIME = 0.5
+#Reset Password
+
+# Load the variables from .env
+load_dotenv()
+
+#Reset Password email (brevo) 
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST =  'smtp-relay.brevo.com' #smtp server
+EMAIL_PORT = '587' 
+EMAIL_USE_TLS = True
+
+# #pulling values from .env file
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER') #brevo email
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD') #brevo smtp key value
+#the email address users will see in the form field
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
+
+# #test (console)
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
