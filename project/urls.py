@@ -24,4 +24,5 @@ urlpatterns = [
     path('password_reset/',include('django_rest_passwordreset.urls',namespace='password_reset')),
     # This line connects the authentication URLs to the main project
     path('api/auth/', include('authentication.urls')),
+    path('api/admin/', include('authentication.admin_urls')),
 ]

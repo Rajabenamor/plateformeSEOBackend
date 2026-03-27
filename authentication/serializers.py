@@ -1,6 +1,8 @@
 # authentication/serializers.py
 from rest_framework import serializers
 from django.contrib.auth.models import User
+from django.core.mail import send_mail
+from django.conf import settings
 #The serializer acts as a translator. It takes the JSON data sent from your Next.js form and securely saves it into Django's default database.
 class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
@@ -21,6 +23,30 @@ class RegisterSerializer(serializers.ModelSerializer):
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password']
+            password=validated_data['password'],
+            is_active=False
         )
+        try:
+            send_mail(
+                subject="Registration Received - Action Required",
+                message=f"Hi {user.username},\n\nThank you for registering! Your account has been created successfully.\nFor security reasons, an administrator must verify and activate your account before you can log in.\n\nYou will receive another email as soon as your account is active.",               
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False
+            )
+        except Exception as e :
+            print(f"Error sending registration email:{e}")
         return user
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model= User
+        fields =[
+            'id',
+            'username',
+            'email',
+            'is_active',
+            'is_staff',
+            'date_joined',
+        ]
+        read_only_fields=['id','date_joined']

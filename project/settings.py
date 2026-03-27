@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 import os 
 from dotenv import load_dotenv
+from datetime import timedelta
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,9 +23,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-%%xjmb+d^e1&s!)!(m6wb-65^!1=y_!=buhjkf*4#1!s8)5e!q'
+# Load the variables from .env
+load_dotenv()
 
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.getenv('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -39,14 +43,17 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework_simplejwt.token_blacklist',
     'rest_framework',
     'corsheaders',
     # 'authentication',
     'authentication.apps.AuthenticationConfig',
     'django_rest_passwordreset',
-    'rest_framework.authtoken',
+   'rest_framework_simplejwt',
+   'django_extensions',
 ]
 
+#password reset token
 DJANGO_REST_PASSWORDRESET_TOKEN_CONFIG ={
     "CLASS" : "django_rest_passwordreset.tokens.RandomStringTokenGenerator",
     "OPTIONS":{
@@ -92,9 +99,9 @@ WSGI_APPLICATION = 'project.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'seo_dashboard_db', #database name
-        'USER': 'seo_user', #the owner of the database i created
-        'PASSWORD': 'seouser123', #password for the user
+        'NAME': os.getenv('DB_NAME'), #database name
+        'USER': os.getenv('DB_USER'), #the owner of the database i created
+        'PASSWORD': os.getenv('DB_PASSWORD'), #password for the user
         'HOST' : 'localhost', #running locally
         'PORT': '5432',
 
@@ -148,24 +155,38 @@ REST_FRAMEWORK = {
 
     ),
 }
-
+#google sign in 
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
 
 FRONTEND_URL ="http://localhost:3000"
 
+#Authorize django to speak with next.js
 CORS_ALLOWED_ORIGINS=[
     "http://localhost:3000",
 ]
 
-#Authorize django to speak with next.js
-CORS_ALLOW_ALL_ORIGINS = True
+# without this, cookies are blocked by the browser
+CORS_ALLOW_CREDENTIALS = True
+
+#simple_jwt config
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,    #every refresh geta a new refresh token
+    'BLACKLIST_AFTER_ROTATION': True, #old refresh token can't be reused
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+}
+
 
 
 #token expiration time : 30 minutes
-DJANGO_REST_MULTITOKENAUTH_RESET_TOKEN_EXPIRY_TIME = 0.5
+DJANGO_REST_PASSWORDRESET_TOKEN_EXPIRY_TIME = 0.5
 #Reset Password
 
-# Load the variables from .env
-load_dotenv()
+
 
 #Reset Password email (brevo) 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -181,3 +202,20 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
 
 # #test (console)
 # EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'authentication':{
+            'handlers':['console'],
+            'level':'INFO',
+        },
+    },
+}
