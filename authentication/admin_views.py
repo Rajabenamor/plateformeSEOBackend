@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
-from .serializers import UserSerializer
+from .serializers import UserSerializer , UserUpdateSerializer
 from django.core.mail import send_mail
 from django.conf import settings
 
@@ -95,38 +95,84 @@ class UsetToggleActiveView(APIView):
 
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
-#create another admin
-class CreateAdminView(APIView):
+#create user / admin / super admin
+
+class CreateUserView(APIView):
     permission_classes = [IsAdminUser]
 
-    def post(self,request):
+    def post(self, request):
+        # Extract string data
         username = request.data.get('username')
         password = request.data.get('password')
+        email = request.data.get('email', '')
+        
+        # Extract boolean data sent from Next.js (default to False if not provided)
+        is_staff = request.data.get('is_staff', False)
+        is_superuser = request.data.get('is_superuser', False)
+        is_active = request.data.get('is_active', False)
 
-        #validate required fields
+        # 1. Validate required fields
         if not username or not password:
             return Response(
                 {'error': 'Username and password are required'},
-                status= status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST
             )
-        #check if username already exists 
+            
+        # 2. Check if username already exists 
         if User.objects.filter(username=username).exists():
             return Response(
                 {'error': 'Username already exists'},
-                status= status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # 3. BACKEND SECURITY CHECK (Defense in Depth)
+        # If the request attempts to create an admin or super_admin, 
+        # strictly enforce that the requester must be a super_admin.
+        if (is_staff or is_superuser) and not request.user.is_superuser:
+            return Response(
+                {'error': 'Only Super Admins can create other administrators.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
-        )
-        #create admin user
+        # 4. Create the base user (handles secure password hashing automatically)
         user = User.objects.create_user(
             username=username,
-            password=password,
-            is_staff=True, #makes them admin
-            is_active=True,
+            email=email,
+            password=password
         )
+        
+        # 5. Apply the specific roles and status, then save
+        user.is_staff = is_staff
+        user.is_superuser = is_superuser
+        user.is_active = is_active
+        user.save()
 
-        logger.info(f"Admin '{request.user.username}' created new admin '{username}'")
+        # Dynamic logging based on what was actually created
+        role_created = "super admin" if is_superuser else ("admin" if is_staff else "user")
+        logger.info(f"Admin '{request.user.username}' created new {role_created} '{username}'")
 
         return Response(
             UserSerializer(user).data,
             status=status.HTTP_201_CREATED
         )
+
+#update user
+class UserUpdateView(generics.UpdateAPIView):
+    """
+    Dedicated view for updating a user.
+    """
+    permission_classes = [IsAdminUser]
+    queryset = User.objects.all()
+    serializer_class = UserUpdateSerializer
+    lookup_field = 'id'
+    lookup_url_kwarg = 'user_id'
+
+    # Optional: You can add safety checks here just like you did in delete!
+    def perform_update(self, serializer):
+        instance = self.get_object()
+        # Prevent a sub-admin from removing a super-admin's privileges
+        if instance.is_superuser and not self.request.user.is_superuser:
+            raise PermissionDenied("You cannot modify a super user.")
+        
+        serializer.save()
+        logger.info(f"Admin '{self.request.user.username}' updated '{instance.username}'")
