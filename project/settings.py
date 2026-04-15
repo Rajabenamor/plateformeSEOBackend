@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'django_rest_passwordreset',
    'rest_framework_simplejwt',
    'django_extensions',
+   'analysis',
 ]
 
 #password reset token
@@ -218,4 +219,14 @@ LOGGING = {
             'level':'INFO',
         },
     },
+}
+
+#upstach 
+CELERY_BROKER_URL= os.getenv("CELERY_BROKER_URL")
+# Security and performance best practices
+CELERY_BROKER_USE_SSL = {
+    'ssl_cert_reqs': None
+}
+CELERY_REDIS_BACKEND_USE_SSL = {
+    'ssl_cert_reqs': None
 }
