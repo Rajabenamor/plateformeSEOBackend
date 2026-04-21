@@ -20,4 +20,6 @@ urlpatterns = [
     #user intgration of ga4 and github 
     path('users/integrations/status/', IntegrationStatusView.as_view(), name='integration-status'),
     path('integrations/github/exchange/', GithubExchangeView.as_view(), name='github-exchange'),
+    path('integrations/github/create-pr/', views.CreateGithubPRView.as_view(), name='github-create-pr'),
+    path('integrations/github/save-repo/', views.SaveGithubRepoView.as_view(), name='save-github-repo'),
 ]

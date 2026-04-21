@@ -183,22 +183,20 @@ def calculate_seo_metrics(url, user_ga4_property_id=None, user_oauth_token=None)
         
         html_content = fetch_html_with_zyte(url)
         
-        # ==========================================
-        # DEBUG BYPASS: AI Call Disabled for Testing
-        # ==========================================
+       # Only run the AI if we successfully grabbed the HTML or PageSpeed issues
+        if html_content or pagespeed_data.get("issues"):
+            ai_analysis = analyze_seo_with_ai(html_content, pagespeed_data.get("issues", {}))
+            content_score = ai_analysis.get("content_score", 0)
+            seo_fixes = ai_analysis.get("seo_fixes", [])
         
-        # if html_content or pagespeed_data.get("issues"):
-        #     ai_analysis = analyze_seo_with_ai(html_content, pagespeed_data.get("issues", {}))
-        #     content_score = ai_analysis.get("content_score", 0)
-        #     seo_fixes = ai_analysis.get("seo_fixes", [])
-        
-        # Inject fake data while you fix the backlink strength issue
-        content_score = 100
-        seo_fixes = [{
-            "title": "🚧 AI Bypassed for Debugging",
-            "explanation": "Gemini API call was skipped to save credits.",
-            "code_fix": "console.log('debugging');"
-        }]
+        # ==========================================
+
+        if not seo_fixes and content_score == 0:
+            seo_fixes = [{
+                "title": "⏳ AI Engine Cooling Down",
+                "explanation": "Our AI engine hit a rate limit. Please wait 30 seconds and try re-scanning the site.",
+                "code_fix": ""
+            }]
         # ==========================================
 
         if not seo_fixes and content_score == 0:
