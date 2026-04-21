@@ -1,4 +1,5 @@
 from rest_framework import generics
+import requests
 from rest_framework.permissions import AllowAny
 from django.contrib.auth.models import User
 from .serializers import RegisterSerializer , UserSerializer , ChangePasswordSerializer
@@ -120,38 +121,30 @@ class GoogleAuthView(APIView):
 
 
 # for dashboard view
+# views.py
 def dashboard_api(request):
-    # Grab the URL from the frontend request 
     target_url = request.GET.get('url')
+    force_refresh = request.GET.get('refresh') == 'true' # <-- NEW: Check for refresh flag
+
     if not target_url:
         return JsonResponse({"status": "error", "message": "URL parameter is required"}, status=400)
     
-    # Create a unique cache key for this specific URL
     safe_url_key = target_url.replace("https://", "").replace("http://", "").replace("/", "_")
     cache_key = f'dashboard_data_{safe_url_key}'
-    cached_data = cache.get(cache_key)
     
-    if cached_data: 
-        return JsonResponse(cached_data)
+    # <-- NEW: Only check cache if we aren't refreshing
+    if not force_refresh:
+        cached_data = cache.get(cache_key)
+        if cached_data: 
+            return JsonResponse(cached_data)
     
-    """
-    This view serves as the single endpoint for your frontend dashboard.
-    """
-    
-    # 1. Call our new unified service function that handles Zyte, GA4, PageSpeed, OpenPageRank, and Gemini AI all at once!
     dashboard_data = calculate_seo_metrics(target_url)
-
-    # 2. Package everything neatly into one Python dictionary. 
-    # Because `calculate_seo_metrics` already formats the data perfectly, we just pass it straight in.
-    dashboard_payload = {
-        "status": "success",
-        "data": dashboard_data
-    }
+    dashboard_payload = {"status": "success", "data": dashboard_data}
     
-    # 3. Save the result in the cache for 24 hours (86400 seconds)
-    cache.set(cache_key, dashboard_payload, 86400)
+    # <-- NEW: Only cache if the scan actually worked
+    if dashboard_data.get('overall_score', 0) > 0:
+        cache.set(cache_key, dashboard_payload, 86400)
 
-    # 4. Return the data to the browser as a JSON response
     return JsonResponse(dashboard_payload)
 
 #user updates his own profile
@@ -195,20 +188,22 @@ class IntegrationStatusView(APIView):
 
     def get(self, request):
         try:
-            # Try to get the user's integrations
             integrations = request.user.integrations
             
             return Response({
                 "github_connected": bool(integrations.github_access_token),
-                "ga4_connected": bool(integrations.ga4_access_token)
+                # Add this line to send the linked repo to Next.js
+                "github_repo": integrations.github_repo_linked, 
+                "ga4_connected": bool(integrations.ga4_access_token),
+                "ga4_property": integrations.ga4_property_id
             })
         except UserIntegration.DoesNotExist:
-            # If the row doesn't exist yet, nothing is connected
             return Response({
                 "github_connected": False,
-                "ga4_connected": False
+                "github_repo": None,
+                "ga4_connected": False,
+                "ga4_property": None
             })
-
 class GithubExchangeView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -250,7 +245,9 @@ class GithubExchangeView(APIView):
                 
             integration.save()
 
-            return Response({"message": "GitHub connected successfully!"}, status=status.HTTP_200_OK)
 
+            return Response({"message": "GitHub connected successfully!"}, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({"error": "An internal server error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                # THIS WILL PRINT THE REAL ERROR TO YOUR DJANGO TERMINAL
+                print(f"CRITICAL GITHUB ERROR: {str(e)}") 
+                return Response({"error": f"An internal server error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

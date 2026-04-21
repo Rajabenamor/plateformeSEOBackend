@@ -97,18 +97,21 @@ WSGI_APPLICATION = 'project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
+# Comment this out temporarily
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         ...
+#     }
+# }
+
+# Add this for a quick local test
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME'), #database name
-        'USER': os.getenv('DB_USER'), #the owner of the database i created
-        'PASSWORD': os.getenv('DB_PASSWORD'), #password for the user
-        'HOST' : 'localhost', #running locally
-        'PORT': '5432',
-
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -220,6 +223,9 @@ LOGGING = {
         },
     },
 }
+
+GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID')
+GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET')
 
 #upstach 
 CELERY_BROKER_URL= os.getenv("CELERY_BROKER_URL")
