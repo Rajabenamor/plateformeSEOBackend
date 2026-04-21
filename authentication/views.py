@@ -1,5 +1,6 @@
 from rest_framework import generics
 import requests
+import uuid
 from rest_framework.permissions import AllowAny
 from django.contrib.auth.models import User
 from .serializers import RegisterSerializer , UserSerializer , ChangePasswordSerializer
@@ -251,3 +252,111 @@ class GithubExchangeView(APIView):
                 # THIS WILL PRINT THE REAL ERROR TO YOUR DJANGO TERMINAL
                 print(f"CRITICAL GITHUB ERROR: {str(e)}") 
                 return Response({"error": f"An internal server error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class CreateGithubPRView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        fix_title = request.data.get('title', 'SEO Fix')
+        code_fix = request.data.get('code_fix', '')
+        
+        # Grab the target file the AI suggested
+        target_file_path = request.data.get('target_file', 'index.html')
+        
+        random_id = uuid.uuid4().hex[:6]
+
+        try:
+            integration = request.user.integrations
+            github_token = integration.github_access_token
+            target_repo = integration.github_repo_linked 
+
+            if not github_token or not target_repo:
+                return Response({"error": "GitHub not connected or repo not selected."}, status=status.HTTP_403_FORBIDDEN)
+
+            headers = {
+                "Authorization": f"token {github_token}",
+                "Accept": "application/vnd.github.v3+json"
+            }
+
+            # 1. Get default branch
+            repo_res = requests.get(f"https://api.github.com/repos/{target_repo}", headers=headers)
+            default_branch = repo_res.json().get("default_branch", "main")
+
+            # 2. Get the SHA of the latest commit
+            ref_res = requests.get(f"https://api.github.com/repos/{target_repo}/git/refs/heads/{default_branch}", headers=headers)
+            latest_sha = ref_res.json()['object']['sha']
+
+            # 3. Create a new branch
+            new_branch_name = f"strive-seo-fix-{random_id}"
+            requests.post(
+                f"https://api.github.com/repos/{target_repo}/git/refs",
+                headers=headers,
+                json={"ref": f"refs/heads/{new_branch_name}", "sha": latest_sha}
+            )
+
+            # 4. Check if the target file actually exists so we can overwrite it
+            file_url = f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}?ref={new_branch_name}"
+            file_res = requests.get(file_url, headers=headers)
+            
+            import base64
+            encoded_code = base64.b64encode(code_fix.encode('utf-8')).decode('utf-8')
+            
+            commit_data = {
+                "message": f"Strive AI SEO Fix: {fix_title}",
+                "content": encoded_code,
+                "branch": new_branch_name
+            }
+            
+            # If the file exists, GitHub REQUIRES its SHA to overwrite it
+            if file_res.status_code == 200:
+                commit_data["sha"] = file_res.json().get("sha")
+
+            # 5. Commit the code to that specific file
+            commit_res = requests.put(
+                f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}",
+                headers=headers,
+                json=commit_data
+            )
+
+            if commit_res.status_code not in [200, 201]:
+                return Response({"error": f"Commit failed: {commit_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 6. Open the Pull Request
+            pr_data = {
+                "title": f"🚀 Strive SEO Auto-Fix: {fix_title}",
+                "body": f"This PR was generated automatically by Strive AI.\n\n**File modified:** `{target_file_path}`\n\nReview the code snippet before merging.",
+                "head": new_branch_name,
+                "base": default_branch
+            }
+            pr_response = requests.post(f"https://api.github.com/repos/{target_repo}/pulls", headers=headers, json=pr_data)
+            
+            if pr_response.status_code == 201:
+                return Response({"message": "Success!", "pr_url": pr_response.json().get("html_url")}, status=status.HTTP_201_CREATED)
+            else:
+                return Response({"error": pr_response.json().get('message')}, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({"error": f"Server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class SaveGithubRepoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        repo_name = request.data.get('repo_name')
+        
+        if not repo_name:
+            return Response({"error": "Repository name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Find the user's integration row
+            integration = request.user.integrations
+            
+            # Save the typed repository name
+            integration.github_repo_linked = repo_name.strip()
+            integration.save()
+            
+            return Response({"message": "Repository saved successfully!"}, status=status.HTTP_200_OK)
+            
+        except UserIntegration.DoesNotExist:
+            return Response({"error": "GitHub is not connected yet."}, status=status.HTTP_400_BAD_REQUEST)
