@@ -11,15 +11,9 @@ import google.generativeai as genai
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 def fetch_ga4_traffic(property_id, access_token=None):
-    """
-    Fetches Active Users for the last 30 days from GA4.
-    Updated to accept dynamic property IDs and OAuth tokens for user-linked accounts.
-    """
     if not property_id:
         return []
 
-    # If the user linked their account via OAuth, use their token. 
-    # Otherwise, it falls back to the server's default credentials (for testing).
     client_options = {}
     if access_token:
         credentials = Credentials(token=access_token)
@@ -49,7 +43,6 @@ def fetch_ga4_traffic(property_id, access_token=None):
         return []
 
 def fetch_pagespeed_data(target_url):
-    """Fetches real performance data with robust error handling."""
     if not target_url.startswith(('http://', 'https://')):
         target_url = f"https://{target_url}"
     
@@ -82,7 +75,6 @@ def fetch_pagespeed_data(target_url):
         return {"score": 0, "issues": {}}
 
 def fetch_html_with_zyte(url):
-    """Uses Zyte API to render JavaScript and extract the final HTML."""
     zyte_api_key = os.getenv("ZYTE_API_KEY")
     api_url = "https://api.zyte.com/v1/extract"
 
@@ -109,9 +101,7 @@ def fetch_html_with_zyte(url):
         return ""
 
 def analyze_seo_with_ai(html_content, pagespeed_issues):
-    """Consolidated AI function using Gemini 2.5 Flash and strict JSON configuration."""
-    # Use the fastest, most capable model for text tasks
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
     prompt = f"""
     You are an expert technical SEO assistant.
@@ -134,7 +124,6 @@ def analyze_seo_with_ai(html_content, pagespeed_issues):
     }}
     """
     try:
-        # Enforce strict JSON generation natively
         response = model.generate_content(
             prompt,
             generation_config=genai.GenerationConfig(
@@ -147,7 +136,6 @@ def analyze_seo_with_ai(html_content, pagespeed_issues):
         return {"content_score": 0, "seo_fixes": []}
 
 def fetch_backlink_strength(url):
-    """Fetches domain authority using the FREE Open PageRank API."""
     opr_api_key = os.getenv("OPEN_PAGERANK_API_KEY")
     if not opr_api_key:
         return 45 
@@ -166,6 +154,7 @@ def fetch_backlink_strength(url):
         response = requests.get(api_url, headers=headers)
         if response.status_code == 200:
             data = response.json()
+            print("DEBUG OPR DATA:", data) # Check your terminal for this!
             try:
                 raw_score = data['response'][0]['page_rank_decimal']
                 if raw_score is None:
@@ -179,11 +168,6 @@ def fetch_backlink_strength(url):
         return 0
 
 def calculate_seo_metrics(url, user_ga4_property_id=None, user_oauth_token=None):
-    """
-    Core function that orchestrates all dynamic data fetching.
-    Follows best practices by declaring defaults before the try/except block.
-    """
-    # 1. Initialize default state to avoid reference errors if something fails
     technical_health = 0
     content_score = 0
     backlink_strength = 0
@@ -191,7 +175,6 @@ def calculate_seo_metrics(url, user_ga4_property_id=None, user_oauth_token=None)
     seo_fixes = []
 
     try:
-        # 2. Fetch data from external APIs
         pagespeed_data = fetch_pagespeed_data(url)
         technical_health = pagespeed_data.get("score", 0)
         
@@ -200,13 +183,22 @@ def calculate_seo_metrics(url, user_ga4_property_id=None, user_oauth_token=None)
         
         html_content = fetch_html_with_zyte(url)
         
-        # 3. Process with AI
+       # Only run the AI if we successfully grabbed the HTML or PageSpeed issues
         if html_content or pagespeed_data.get("issues"):
             ai_analysis = analyze_seo_with_ai(html_content, pagespeed_data.get("issues", {}))
             content_score = ai_analysis.get("content_score", 0)
             seo_fixes = ai_analysis.get("seo_fixes", [])
+        
+        # ==========================================
 
-        # 4. Handle Gemini Rate Limits Gracefully
+        if not seo_fixes and content_score == 0:
+            seo_fixes = [{
+                "title": "⏳ AI Engine Cooling Down",
+                "explanation": "Our AI engine hit a rate limit. Please wait 30 seconds and try re-scanning the site.",
+                "code_fix": ""
+            }]
+        # ==========================================
+
         if not seo_fixes and content_score == 0:
             seo_fixes = [{
                 "title": "⏳ AI Engine Cooling Down",
@@ -216,9 +208,7 @@ def calculate_seo_metrics(url, user_ga4_property_id=None, user_oauth_token=None)
 
     except Exception as e:
         print(f"DEBUG: Analysis failed. Reason: {e}")
-        # Defaults are already set, so we don't need messy 'locals()' checks here
 
-    # Calculate overall score
     overall_score = int((technical_health * 0.4) + (content_score * 0.4) + (backlink_strength * 0.2))
 
     return {
