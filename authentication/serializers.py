@@ -3,6 +3,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
 from django.conf import settings
+from django.contrib.auth.password_validation import validate_password
 #The serializer acts as a translator. It takes the JSON data sent from your Next.js form and securely saves it into Django's default database.
 class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
@@ -56,3 +57,20 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         #the fields that will be updated 
         fields = ['id','username','email']
         read_only_fields=['id']
+
+#user logged in changes his password in settings
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
+
+    def validate_old_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Your old password was entered incorrectly.")
+        return value
+
+    def save(self, **kwargs):
+        user = self.context['request'].user
+        user.set_password(self.validated_data['new_password'])
+        user.save()
+        return user
