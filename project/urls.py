@@ -27,5 +27,6 @@ urlpatterns = [
     path('api/auth/', include('authentication.urls')),
     path('api/admin/', include('authentication.admin_urls')),
     # This line tells Django: "Send any web traffic to the 'authentication' app to figure out"
-    path('', include('authentication.urls')),
-]
+     path('', include('authentication.urls')),
+     path('api/analysis/', include('analysis.urls')),
+ ]

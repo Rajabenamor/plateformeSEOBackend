@@ -1,7 +1,7 @@
 # authentication/urls.py
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView , TokenVerifyView
-from .views import RegisterView , GoogleAuthView , CustomTokenObtainPairView
+from .views import RegisterView , GoogleAuthView , CustomTokenObtainPairView , UserProfileView , IntegrationStatusView , GithubExchangeView
 from django.urls import include
 from . import views
 
@@ -15,4 +15,11 @@ urlpatterns = [
     path('register/', RegisterView.as_view(), name='auth_register'),
     path('google/', GoogleAuthView.as_view(), name='google_auth' ),
     path('api/dashboard/', views.dashboard_api, name='dashboard_api'),
+    #user updates his own profile
+    path('users/me/', UserProfileView.as_view(), name='user-profile'),
+    #user intgration of ga4 and github 
+    path('users/integrations/status/', IntegrationStatusView.as_view(), name='integration-status'),
+    path('integrations/github/exchange/', GithubExchangeView.as_view(), name='github-exchange'),
+    path('integrations/github/create-pr/', views.CreateGithubPRView.as_view(), name='github-create-pr'),
+    path('integrations/github/save-repo/', views.SaveGithubRepoView.as_view(), name='save-github-repo'),
 ]

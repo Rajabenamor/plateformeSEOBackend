@@ -1,7 +1,9 @@
 from rest_framework import generics
+import requests
+import uuid
 from rest_framework.permissions import AllowAny
 from django.contrib.auth.models import User
-from .serializers import RegisterSerializer
+from .serializers import RegisterSerializer , UserSerializer , ChangePasswordSerializer
 from google.oauth2 import id_token
 from django.conf import settings
 from rest_framework import status 
@@ -15,6 +17,8 @@ from rest_framework import serializers
 from django.core.cache import cache
 from django.http import JsonResponse
 from .services import calculate_seo_metrics
+from rest_framework.permissions import IsAuthenticated
+from .models import UserIntegration
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (AllowAny,) # Allows anyone (even guests) to access the registration page
@@ -118,36 +122,241 @@ class GoogleAuthView(APIView):
 
 
 # for dashboard view
+# views.py
 def dashboard_api(request):
-    # Grab the URL from the frontend request 
     target_url = request.GET.get('url')
+    force_refresh = request.GET.get('refresh') == 'true' # <-- NEW: Check for refresh flag
+
     if not target_url:
         return JsonResponse({"status": "error", "message": "URL parameter is required"}, status=400)
     
-    # Create a unique cache key for this specific URL
     safe_url_key = target_url.replace("https://", "").replace("http://", "").replace("/", "_")
     cache_key = f'dashboard_data_{safe_url_key}'
-    cached_data = cache.get(cache_key)
     
-    if cached_data: 
-        return JsonResponse(cached_data)
+    # <-- NEW: Only check cache if we aren't refreshing
+    if not force_refresh:
+        cached_data = cache.get(cache_key)
+        if cached_data: 
+            return JsonResponse(cached_data)
     
-    """
-    This view serves as the single endpoint for your frontend dashboard.
-    """
-    
-    # 1. Call our new unified service function that handles Zyte, GA4, PageSpeed, OpenPageRank, and Gemini AI all at once!
     dashboard_data = calculate_seo_metrics(target_url)
-
-    # 2. Package everything neatly into one Python dictionary. 
-    # Because `calculate_seo_metrics` already formats the data perfectly, we just pass it straight in.
-    dashboard_payload = {
-        "status": "success",
-        "data": dashboard_data
-    }
+    dashboard_payload = {"status": "success", "data": dashboard_data}
     
-    # 3. Save the result in the cache for 24 hours (86400 seconds)
-    cache.set(cache_key, dashboard_payload, 86400)
+    # <-- NEW: Only cache if the scan actually worked
+    if dashboard_data.get('overall_score', 0) > 0:
+        cache.set(cache_key, dashboard_payload, 86400)
 
-    # 4. Return the data to the browser as a JSON response
     return JsonResponse(dashboard_payload)
+
+#user updates his own profile
+class UserProfileView(generics.RetrieveUpdateAPIView):
+    """
+    Handles GET and PATCH for the currently logged-in user.
+    No ID is needed in the URL.
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = UserSerializer
+
+    def get_object(self):
+        # This is the ultimate security check. 
+        # It ignores the URL completely and grabs the user from the JWT token.
+        return self.request.user
+
+#view for logged in user to change his password in settings
+class ChangePasswordView(generics.UpdateAPIView):
+    """
+    An endpoint for changing password.
+    """
+    serializer_class = ChangePasswordSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, queryset=None):
+        return self.request.user
+
+    def update(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"message": "Password updated successfully."}, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#the user integration og ga4 and github 
+class IntegrationStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            integrations = request.user.integrations
+            
+            return Response({
+                "github_connected": bool(integrations.github_access_token),
+                # Add this line to send the linked repo to Next.js
+                "github_repo": integrations.github_repo_linked, 
+                "ga4_connected": bool(integrations.ga4_access_token),
+                "ga4_property": integrations.ga4_property_id
+            })
+        except UserIntegration.DoesNotExist:
+            return Response({
+                "github_connected": False,
+                "github_repo": None,
+                "ga4_connected": False,
+                "ga4_property": None
+            })
+class GithubExchangeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # 1. Grab the Ticket (code) and Installation ID from Next.js
+        code = request.data.get('code')
+        installation_id = request.data.get('installation_id')
+
+        if not code:
+            return Response({"error": "No authorization code provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # 2. Exchange the temporary code for a permanent Access Token
+            # Note: You need to add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET to your Django settings.py
+            github_response = requests.post(
+                'https://github.com/login/oauth/access_token',
+                headers={'Accept': 'application/json'},
+                data={
+                    'client_id': settings.GITHUB_CLIENT_ID,
+                    'client_secret': settings.GITHUB_CLIENT_SECRET,
+                    'code': code,
+                }
+            )
+            
+            github_data = github_response.json()
+            access_token = github_data.get('access_token')
+
+            if not access_token:
+                return Response({"error": "GitHub denied the token exchange."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 3. Save the tokens to the database model we just built
+            integration, created = UserIntegration.objects.get_or_create(user=request.user)
+            integration.github_access_token = access_token
+            
+            # Save the installation_id. This is crucial for GitHub Apps so Strive 
+            # knows exactly which repos it is allowed to edit.
+            if installation_id:
+                integration.github_repo_linked = installation_id 
+                
+            integration.save()
+
+
+            return Response({"message": "GitHub connected successfully!"}, status=status.HTTP_200_OK)
+        except Exception as e:
+                # THIS WILL PRINT THE REAL ERROR TO YOUR DJANGO TERMINAL
+                print(f"CRITICAL GITHUB ERROR: {str(e)}") 
+                return Response({"error": f"An internal server error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class CreateGithubPRView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        fix_title = request.data.get('title', 'SEO Fix')
+        code_fix = request.data.get('code_fix', '')
+        
+        # Grab the target file the AI suggested
+        target_file_path = request.data.get('target_file', 'index.html')
+        
+        random_id = uuid.uuid4().hex[:6]
+
+        try:
+            integration = request.user.integrations
+            github_token = integration.github_access_token
+            target_repo = integration.github_repo_linked 
+
+            if not github_token or not target_repo:
+                return Response({"error": "GitHub not connected or repo not selected."}, status=status.HTTP_403_FORBIDDEN)
+
+            headers = {
+                "Authorization": f"token {github_token}",
+                "Accept": "application/vnd.github.v3+json"
+            }
+
+            # 1. Get default branch
+            repo_res = requests.get(f"https://api.github.com/repos/{target_repo}", headers=headers)
+            default_branch = repo_res.json().get("default_branch", "main")
+
+            # 2. Get the SHA of the latest commit
+            ref_res = requests.get(f"https://api.github.com/repos/{target_repo}/git/refs/heads/{default_branch}", headers=headers)
+            latest_sha = ref_res.json()['object']['sha']
+
+            # 3. Create a new branch
+            new_branch_name = f"strive-seo-fix-{random_id}"
+            requests.post(
+                f"https://api.github.com/repos/{target_repo}/git/refs",
+                headers=headers,
+                json={"ref": f"refs/heads/{new_branch_name}", "sha": latest_sha}
+            )
+
+            # 4. Check if the target file actually exists so we can overwrite it
+            file_url = f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}?ref={new_branch_name}"
+            file_res = requests.get(file_url, headers=headers)
+            
+            import base64
+            encoded_code = base64.b64encode(code_fix.encode('utf-8')).decode('utf-8')
+            
+            commit_data = {
+                "message": f"Strive AI SEO Fix: {fix_title}",
+                "content": encoded_code,
+                "branch": new_branch_name
+            }
+            
+            # If the file exists, GitHub REQUIRES its SHA to overwrite it
+            if file_res.status_code == 200:
+                commit_data["sha"] = file_res.json().get("sha")
+
+            # 5. Commit the code to that specific file
+            commit_res = requests.put(
+                f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}",
+                headers=headers,
+                json=commit_data
+            )
+
+            if commit_res.status_code not in [200, 201]:
+                return Response({"error": f"Commit failed: {commit_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 6. Open the Pull Request
+            pr_data = {
+                "title": f"🚀 Strive SEO Auto-Fix: {fix_title}",
+                "body": f"This PR was generated automatically by Strive AI.\n\n**File modified:** `{target_file_path}`\n\nReview the code snippet before merging.",
+                "head": new_branch_name,
+                "base": default_branch
+            }
+            pr_response = requests.post(f"https://api.github.com/repos/{target_repo}/pulls", headers=headers, json=pr_data)
+            
+            if pr_response.status_code == 201:
+                return Response({"message": "Success!", "pr_url": pr_response.json().get("html_url")}, status=status.HTTP_201_CREATED)
+            else:
+                return Response({"error": pr_response.json().get('message')}, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({"error": f"Server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class SaveGithubRepoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        repo_name = request.data.get('repo_name')
+        
+        if not repo_name:
+            return Response({"error": "Repository name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Find the user's integration row
+            integration = request.user.integrations
+            
+            # Save the typed repository name
+            integration.github_repo_linked = repo_name.strip()
+            integration.save()
+            
+            return Response({"message": "Repository saved successfully!"}, status=status.HTTP_200_OK)
+            
+        except UserIntegration.DoesNotExist:
+            return Response({"error": "GitHub is not connected yet."}, status=status.HTTP_400_BAD_REQUEST)
