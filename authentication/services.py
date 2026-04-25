@@ -101,24 +101,52 @@ def fetch_html_with_zyte(url):
         return ""
 
 def analyze_seo_with_ai(html_content, pagespeed_issues):
-    model = genai.GenerativeModel('gemini-2.5-flash-lite')
+    model = genai.GenerativeModel('gemini-3-flash-preview')
 
+    # prompt = f"""
+    # You are an expert technical SEO assistant.
+    # Review this raw Google PageSpeed Insights failed audits list: {json.dumps(pagespeed_issues)}
+    # And review this raw HTML: {html_content[:50000]}
+    
+    # 1. Calculate a "content_score" from 1 to 100 based on the presence of meta tags, H1/H2 structure, and keyword density.
+    # 2. Identify the 3 most critical issues that can be fixed with code.
+    
+    # Return EXACTLY this JSON structure:
+    # {{
+    #     "content_score": 85,
+    #     "seo_fixes": [
+    #         {{
+    #             "title": "Short title of the issue",
+    #             "explanation": "Brief explanation of why it matters",
+    #             "code_fix": "The exact HTML/CSS/JS snippet to fix it"
+    #         }}
+    #     ]
+    # }}
+    # """
     prompt = f"""
-    You are an expert technical SEO assistant.
-    Review this raw Google PageSpeed Insights failed audits list: {json.dumps(pagespeed_issues)}
-    And review this raw HTML: {html_content[:50000]}
-    
-    1. Calculate a "content_score" from 1 to 100 based on the presence of meta tags, H1/H2 structure, and keyword density.
-    2. Identify the 3 most critical issues that can be fixed with code.
-    
+    You are an elite Technical SEO Architect and Senior Frontend Developer. 
+    Your objective is to comprehensively analyze the provided Google PageSpeed Insights data and raw HTML, and identify ALL actionable SEO and performance issues.
+
+    INPUT DATA:
+    - PageSpeed Failed Audits: {json.dumps(pagespeed_issues)}
+    - Raw HTML (Truncated to 50k chars): {html_content}
+
+    TASKS:
+    1. Calculate an AUTHENTIC "content_score" from 1 to 100. You MUST genuinely evaluate the semantic structure (H1/H2), meta tags, accessibility, and keyword optimization of the provided HTML to derive this number. Do NOT output a static or default value.
+    2. Identify EVERY critical and moderate issue that can be resolved via code. Do not arbitrarily limit the number of issues. Provide the specific code snippet needed to fix each issue.
+
+    REQUIREMENTS:
+    - Do not hallucinate external CSS or JS files; fix what is inside the HTML.
+    - Return ONLY valid JSON. Do not wrap the JSON in markdown formatting blocks (like ```json).
+
     Return EXACTLY this JSON structure:
     {{
-        "content_score": 85,
+        "content_score": [INSERT_YOUR_DYNAMIC_CALCULATED_INTEGER_HERE],
         "seo_fixes": [
             {{
-                "title": "Short title of the issue",
-                "explanation": "Brief explanation of why it matters",
-                "code_fix": "The exact HTML/CSS/JS snippet to fix it"
+                "title": "Missing Meta Description",
+                "explanation": "Added a concise meta description to improve CTR and search visibility.",
+                "code_fix": "<meta name=\\"description\\" content=\\"...\\">" 
             }}
         ]
     }}
@@ -156,8 +184,13 @@ def fetch_backlink_strength(url):
             data = response.json()
             print("DEBUG OPR DATA:", data) # Check your terminal for this!
             try:
+                # --- THIS IS THE MAGIC FIX FOR VERCEL DOMAINS ---
+                if data['response'][0].get('status_code') == 404:
+                    print("DEBUG: Catching 404. Returning baseline 10.")
+                    return 10 
+                # ------------------------------------------------
                 raw_score = data['response'][0]['page_rank_decimal']
-                if raw_score is None:
+                if raw_score is None or raw_score == "":
                     return 10 
                 return int(float(raw_score) * 10)
             except (IndexError, KeyError):
@@ -191,13 +224,6 @@ def calculate_seo_metrics(url, user_ga4_property_id=None, user_oauth_token=None)
         
         # ==========================================
 
-        if not seo_fixes and content_score == 0:
-            seo_fixes = [{
-                "title": "⏳ AI Engine Cooling Down",
-                "explanation": "Our AI engine hit a rate limit. Please wait 30 seconds and try re-scanning the site.",
-                "code_fix": ""
-            }]
-        # ==========================================
 
         if not seo_fixes and content_score == 0:
             seo_fixes = [{
