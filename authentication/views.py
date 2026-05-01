@@ -1,6 +1,9 @@
 from rest_framework import generics
 import requests
 import uuid
+import base64
+import os
+import google.generativeai as genai
 from rest_framework.permissions import AllowAny
 from django.contrib.auth.models import User
 from .serializers import RegisterSerializer , UserSerializer , ChangePasswordSerializer
@@ -258,15 +261,15 @@ class GithubExchangeView(APIView):
                 return Response({"error": f"An internal server error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 
+
 class CreateGithubPRView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         fix_title = request.data.get('title', 'SEO Fix')
-        code_fix = request.data.get('code_fix', '')
-        
-        # Grab the target file the AI suggested
-        target_file_path = request.data.get('target_file', 'index.html')
+        fix_explanation = request.data.get('explanation', '')
+        # Fallback to a common Next.js file if none is provided
+        target_file_path = request.data.get('target_file', 'src/app/page.tsx') 
         
         random_id = uuid.uuid4().hex[:6]
 
@@ -285,38 +288,80 @@ class CreateGithubPRView(APIView):
 
             # 1. Get default branch
             repo_res = requests.get(f"https://api.github.com/repos/{target_repo}", headers=headers)
+            if repo_res.status_code != 200:
+                print(f"GITHUB REPO ERROR: {repo_res.text}")
+                return Response({"error": f"Could not access repo '{target_repo}'. GitHub says: {repo_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
+            
             default_branch = repo_res.json().get("default_branch", "main")
 
             # 2. Get the SHA of the latest commit
-            ref_res = requests.get(f"https://api.github.com/repos/{target_repo}/git/refs/heads/{default_branch}", headers=headers)
+            ref_url = f"https://api.github.com/repos/{target_repo}/git/refs/heads/{default_branch}"
+            ref_res = requests.get(ref_url, headers=headers)
+            if ref_res.status_code != 200:
+                print(f"GITHUB BRANCH ERROR: {ref_res.text}")
+                return Response({"error": f"Could not find branch '{default_branch}'. GitHub says: {ref_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
+            
             latest_sha = ref_res.json()['object']['sha']
 
-            # 3. Create a new branch
+            # 3. DOWNLOAD RAW SOURCE CODE
+            file_url = f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}?ref={default_branch}"
+            file_res = requests.get(file_url, headers=headers)
+            
+            if file_res.status_code != 200:
+                print(f"GITHUB FILE ERROR: {file_res.text}")
+                return Response({"error": f"Could not find {target_file_path} in the repository."}, status=status.HTTP_400_BAD_REQUEST)
+
+            file_data = file_res.json()
+            file_sha = file_data['sha'] # Required by GitHub to overwrite the file later
+            raw_source_code = base64.b64decode(file_data['content']).decode('utf-8')
+
+            # 4. ASK GEMINI TO FIX THE REAL SOURCE CODE
+            genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            
+            prompt = f"""
+            You are an expert Next.js/React developer.
+            I need to fix the following SEO issue in the code:
+            Issue: {fix_title}
+            Details: {fix_explanation}
+
+            Here is the EXACT source code of `{target_file_path}` from the repository:
+            ```
+            {raw_source_code}
+            ```
+
+            Rewrite the file to fix the SEO issue. 
+            CRITICAL: Return ONLY the raw, updated code. Do NOT include markdown code blocks (like ```javascript). Do NOT include any text explanations. The output must compile perfectly.
+            """
+            
+            ai_response = model.generate_content(prompt)
+            fixed_code = ai_response.text.strip()
+            
+            # Failsafe: strip markdown blocks if Gemini disobeys the prompt
+            if fixed_code.startswith("```"):
+                fixed_code = "\n".join(fixed_code.split("\n")[1:-1])
+
+            # 5. Create a new branch
             new_branch_name = f"strive-seo-fix-{random_id}"
-            requests.post(
+            branch_res = requests.post(
                 f"https://api.github.com/repos/{target_repo}/git/refs",
                 headers=headers,
                 json={"ref": f"refs/heads/{new_branch_name}", "sha": latest_sha}
             )
+            
+            if branch_res.status_code != 201:
+                print(f"GITHUB BRANCH CREATION ERROR: {branch_res.text}")
+                return Response({"error": f"Failed to create branch. GitHub says: {branch_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 4. Check if the target file actually exists so we can overwrite it
-            file_url = f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}?ref={new_branch_name}"
-            file_res = requests.get(file_url, headers=headers)
-            
-            import base64
-            encoded_code = base64.b64encode(code_fix.encode('utf-8')).decode('utf-8')
-            
+            # 6. Commit the AI's fixed code
+            encoded_code = base64.b64encode(fixed_code.encode('utf-8')).decode('utf-8')
             commit_data = {
                 "message": f"Strive AI SEO Fix: {fix_title}",
                 "content": encoded_code,
-                "branch": new_branch_name
+                "branch": new_branch_name,
+                "sha": file_sha # Tells GitHub we are overwriting an existing file
             }
             
-            # If the file exists, GitHub REQUIRES its SHA to overwrite it
-            if file_res.status_code == 200:
-                commit_data["sha"] = file_res.json().get("sha")
-
-            # 5. Commit the code to that specific file
             commit_res = requests.put(
                 f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}",
                 headers=headers,
@@ -324,12 +369,13 @@ class CreateGithubPRView(APIView):
             )
 
             if commit_res.status_code not in [200, 201]:
+                print(f"GITHUB COMMIT ERROR: {commit_res.text}")
                 return Response({"error": f"Commit failed: {commit_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 6. Open the Pull Request
+            # 7. Open the Pull Request
             pr_data = {
                 "title": f"🚀 Strive SEO Auto-Fix: {fix_title}",
-                "body": f"This PR was generated automatically by Strive AI.\n\n**File modified:** `{target_file_path}`\n\nReview the code snippet before merging.",
+                "body": f"This PR was generated automatically by Strive AI.\n\n**File modified:** `{target_file_path}`\n\nThe AI read your source code and applied the necessary optimizations. Review the changes before merging.",
                 "head": new_branch_name,
                 "base": default_branch
             }
@@ -338,9 +384,11 @@ class CreateGithubPRView(APIView):
             if pr_response.status_code == 201:
                 return Response({"message": "Success!", "pr_url": pr_response.json().get("html_url")}, status=status.HTTP_201_CREATED)
             else:
-                return Response({"error": pr_response.json().get('message')}, status=status.HTTP_400_BAD_REQUEST)
+                print(f"GITHUB PR ERROR: {pr_response.text}")
+                return Response({"error": f"Failed to open PR: {pr_response.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
+            print(f"CRITICAL SERVER ERROR: {str(e)}")
             return Response({"error": f"Server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class SaveGithubRepoView(APIView):
