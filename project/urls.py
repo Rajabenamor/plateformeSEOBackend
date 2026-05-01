@@ -20,13 +20,10 @@ from django.urls import path , include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-     #reset password 
     path('password_reset/',include('django_rest_passwordreset.urls',namespace='password_reset')),
     
-    # This line connects the authentication URLs to the main project
     path('api/auth/', include('authentication.urls')),
     path('api/admin/', include('authentication.admin_urls')),
-    # This line tells Django: "Send any web traffic to the 'authentication' app to figure out"
      path('', include('authentication.urls')),
      path('api/analysis/', include('analysis.urls')),
  ]

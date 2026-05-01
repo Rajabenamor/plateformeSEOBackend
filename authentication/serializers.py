@@ -4,23 +4,20 @@ from django.contrib.auth.models import User
 from django.core.mail import send_mail
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
-#The serializer acts as a translator. It takes the JSON data sent from your Next.js form and securely saves it into Django's default database.
 class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'password')
         extra_kwargs = {
-            'password': {'write_only': True}, # Ensures the password is never sent back in a response
-            'email': {'required': True}       # Makes the email field mandatory
+            'password': {'write_only': True},
+            'email': {'required': True}
         }
-        # validate if the email already exist
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("A user with that email already exists.")
         return value
 
     def create(self, validated_data):
-        # create_user automatically hashes and secures the password
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
@@ -54,11 +51,9 @@ class UserSerializer(serializers.ModelSerializer):
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta :
         model= User
-        #the fields that will be updated 
         fields = ['id','username','email']
         read_only_fields=['id']
 
-#user logged in changes his password in settings
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=True, write_only=True)
     new_password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
