@@ -28,19 +28,17 @@ from rest_framework.decorators import api_view, permission_classes
 from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
-    permission_classes = (AllowAny,) # Allows anyone (even guests) to access the registration page
+    permission_classes = (AllowAny,)
     serializer_class = RegisterSerializer
 
-#custom for logging to pass is_staff=true with the token 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-        token['is_staff'] = user.is_staff  # ← inject is_staff into token
+        token['is_staff'] = user.is_staff
         token['is_superuser'] = user.is_superuser
         return token
     def validate(self, attrs):
-        #find the user to check status before standard validation
         username= attrs.get(self.username_field)
         user = User.objects.filter(username=username).first()
         if user and not user.is_active:
@@ -48,25 +46,21 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 {'error':'Your account is pending admin approval.Please check your email.'}
             )
         data = super().validate(attrs)
-        data['is_staff'] = self.user.is_staff  # ← add to response too
-        # --- NEW: Send user data to Next.js ---
-        # .strip() handles cases where a user might only have a first name
-        # "or self.user.username" provides a fallback if they haven't set a name at all
+        data['is_staff'] = self.user.is_staff
         data['user'] = {
             'email': self.user.email,
             'username': f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username,
-            'plan': 'Free Plan' # You can tie this to a real Subscription model later
+            'plan': 'Free Plan'
         }
         
         return data
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
-#google auth for google sign in 
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
     def post(self,request):
-        credential = request.data.get('credential') # ID token from google
+        credential = request.data.get('credential')
 
         if not credential:
             return Response(
@@ -74,7 +68,6 @@ class GoogleAuthView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         try:
-            #verify ID token locally - no extra network call to google
             google_data=id_token.verify_oauth2_token(
                 credential,
                 google_requests.Request(),
@@ -94,13 +87,9 @@ class GoogleAuthView(APIView):
                 {'error':'Email not provided by Google'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        #looking for user by email first
         try:
             user = User.objects.get(email=email)
-            #user exist - log them in , without creating a new account
         except User.DoesNotExist:
-            #user doesnt exist , create account
-            #remove it ? since google users are active by default
             user = User.objects.create_user(
                 username=email.split('@')[0],
                 email=email,
@@ -116,14 +105,13 @@ class GoogleAuthView(APIView):
             )
         refresh = RefreshToken.for_user(user)
         refresh['is_staff'] = user.is_staff
-       # --- NEW: Send user data to Next.js ---
         return Response({
             'access': str(refresh.access_token),
             'refresh': str(refresh),
             'user': {
                 'email': user.email,
                 'username': f"{user.first_name} {user.last_name}".strip() or user.username,
-                'plan': 'Free Plan' # Default plan for new Google sign-ups
+                'plan': 'Free Plan'
             }
         }, status=status.HTTP_200_OK)
 
@@ -132,7 +120,7 @@ class GoogleAuthView(APIView):
 # views.py
 def dashboard_api(request):
     target_url = request.GET.get('url')
-    force_refresh = request.GET.get('refresh') == 'true' # <-- NEW: Check for refresh flag
+    force_refresh = request.GET.get('refresh') == 'true'
 
     if not target_url:
         return JsonResponse({"status": "error", "message": "URL parameter is required"}, status=400)
@@ -140,7 +128,6 @@ def dashboard_api(request):
     safe_url_key = target_url.replace("https://", "").replace("http://", "").replace("/", "_")
     cache_key = f'dashboard_data_{safe_url_key}'
     
-    # <-- NEW: Only check cache if we aren't refreshing
     if not force_refresh:
         cached_data = cache.get(cache_key)
         if cached_data: 
@@ -149,13 +136,11 @@ def dashboard_api(request):
     dashboard_data = calculate_seo_metrics(target_url)
     dashboard_payload = {"status": "success", "data": dashboard_data}
     
-    # <-- NEW: Only cache if the scan actually worked
     if dashboard_data.get('overall_score', 0) > 0:
         cache.set(cache_key, dashboard_payload, 86400)
 
     return JsonResponse(dashboard_payload)
 
-#user updates his own profile
 class UserProfileView(generics.RetrieveAPIView):
     """
     Handles GET and PATCH for the currently logged-in user.
@@ -165,11 +150,8 @@ class UserProfileView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
 
     def get_object(self):
-        # This is the ultimate security check. 
-        # It ignores the URL completely and grabs the user from the JWT token.
         return self.request.user
 
-#view for logged in user to change his password in settings
 class ChangePasswordView(generics.UpdateAPIView):
     """
     An endpoint for changing password.
@@ -190,7 +172,6 @@ class ChangePasswordView(generics.UpdateAPIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-#the user integration og ga4 and github 
 class IntegrationStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -200,7 +181,6 @@ class IntegrationStatusView(APIView):
             
             return Response({
                 "github_connected": bool(integrations.github_access_token),
-                # Add this line to send the linked repo to Next.js
                 "github_repo": integrations.github_repo_linked, 
                 "ga4_connected": bool(integrations.ga4_access_token),
                 "ga4_property": integrations.ga4_property_id
@@ -216,7 +196,6 @@ class GithubExchangeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # 1. Grab the Ticket (code) and Installation ID from Next.js
         code = request.data.get('code')
         installation_id = request.data.get('installation_id')
 
@@ -224,8 +203,6 @@ class GithubExchangeView(APIView):
             return Response({"error": "No authorization code provided."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # 2. Exchange the temporary code for a permanent Access Token
-            # Note: You need to add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET to your Django settings.py
             github_response = requests.post(
                 'https://github.com/login/oauth/access_token',
                 headers={'Accept': 'application/json'},
@@ -242,12 +219,9 @@ class GithubExchangeView(APIView):
             if not access_token:
                 return Response({"error": "GitHub denied the token exchange."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 3. Save the tokens to the database model we just built
             integration, created = UserIntegration.objects.get_or_create(user=request.user)
             integration.github_access_token = access_token
             
-            # Save the installation_id. This is crucial for GitHub Apps so Strive 
-            # knows exactly which repos it is allowed to edit.
             if installation_id:
                 integration.github_repo_linked = installation_id 
                 
@@ -256,7 +230,6 @@ class GithubExchangeView(APIView):
 
             return Response({"message": "GitHub connected successfully!"}, status=status.HTTP_200_OK)
         except Exception as e:
-                # THIS WILL PRINT THE REAL ERROR TO YOUR DJANGO TERMINAL
                 print(f"CRITICAL GITHUB ERROR: {str(e)}") 
                 return Response({"error": f"An internal server error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
@@ -268,7 +241,6 @@ class CreateGithubPRView(APIView):
     def post(self, request):
         fix_title = request.data.get('title', 'SEO Fix')
         fix_explanation = request.data.get('explanation', '')
-        # Fallback to a common Next.js file if none is provided
         target_file_path = request.data.get('target_file', 'src/app/page.tsx') 
         
         random_id = uuid.uuid4().hex[:6]
@@ -286,7 +258,6 @@ class CreateGithubPRView(APIView):
                 "Accept": "application/vnd.github.v3+json"
             }
 
-            # 1. Get default branch
             repo_res = requests.get(f"https://api.github.com/repos/{target_repo}", headers=headers)
             if repo_res.status_code != 200:
                 print(f"GITHUB REPO ERROR: {repo_res.text}")
@@ -294,7 +265,6 @@ class CreateGithubPRView(APIView):
             
             default_branch = repo_res.json().get("default_branch", "main")
 
-            # 2. Get the SHA of the latest commit
             ref_url = f"https://api.github.com/repos/{target_repo}/git/refs/heads/{default_branch}"
             ref_res = requests.get(ref_url, headers=headers)
             if ref_res.status_code != 200:
@@ -303,7 +273,6 @@ class CreateGithubPRView(APIView):
             
             latest_sha = ref_res.json()['object']['sha']
 
-            # 3. DOWNLOAD RAW SOURCE CODE
             file_url = f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}?ref={default_branch}"
             file_res = requests.get(file_url, headers=headers)
             
@@ -312,10 +281,9 @@ class CreateGithubPRView(APIView):
                 return Response({"error": f"Could not find {target_file_path} in the repository."}, status=status.HTTP_400_BAD_REQUEST)
 
             file_data = file_res.json()
-            file_sha = file_data['sha'] # Required by GitHub to overwrite the file later
+            file_sha = file_data['sha']
             raw_source_code = base64.b64decode(file_data['content']).decode('utf-8')
 
-            # 4. ASK GEMINI TO FIX THE REAL SOURCE CODE
             genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
             model = genai.GenerativeModel('gemini-2.5-flash-lite')
             
@@ -337,11 +305,9 @@ class CreateGithubPRView(APIView):
             ai_response = model.generate_content(prompt)
             fixed_code = ai_response.text.strip()
             
-            # Failsafe: strip markdown blocks if Gemini disobeys the prompt
             if fixed_code.startswith("```"):
                 fixed_code = "\n".join(fixed_code.split("\n")[1:-1])
 
-            # 5. Create a new branch
             new_branch_name = f"strive-seo-fix-{random_id}"
             branch_res = requests.post(
                 f"https://api.github.com/repos/{target_repo}/git/refs",
@@ -353,13 +319,12 @@ class CreateGithubPRView(APIView):
                 print(f"GITHUB BRANCH CREATION ERROR: {branch_res.text}")
                 return Response({"error": f"Failed to create branch. GitHub says: {branch_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 6. Commit the AI's fixed code
             encoded_code = base64.b64encode(fixed_code.encode('utf-8')).decode('utf-8')
             commit_data = {
                 "message": f"Strive AI SEO Fix: {fix_title}",
                 "content": encoded_code,
                 "branch": new_branch_name,
-                "sha": file_sha # Tells GitHub we are overwriting an existing file
+                "sha": file_sha
             }
             
             commit_res = requests.put(
@@ -372,7 +337,6 @@ class CreateGithubPRView(APIView):
                 print(f"GITHUB COMMIT ERROR: {commit_res.text}")
                 return Response({"error": f"Commit failed: {commit_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 7. Open the Pull Request
             pr_data = {
                 "title": f"🚀 Strive SEO Auto-Fix: {fix_title}",
                 "body": f"This PR was generated automatically by Strive AI.\n\n**File modified:** `{target_file_path}`\n\nThe AI read your source code and applied the necessary optimizations. Review the changes before merging.",
@@ -401,10 +365,8 @@ class SaveGithubRepoView(APIView):
             return Response({"error": "Repository name is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Find the user's integration row
             integration = request.user.integrations
             
-            # Save the typed repository name
             integration.github_repo_linked = repo_name.strip()
             integration.save()
             
@@ -414,7 +376,6 @@ class SaveGithubRepoView(APIView):
             return Response({"error": "GitHub is not connected yet."}, status=status.HTTP_400_BAD_REQUEST)
 
 
-#profile settings 
 signer = TimestampSigner()
 
 @api_view(['POST'])
@@ -426,58 +387,47 @@ def update_profile(request):
 
     response_data = {"success": True, "message": "", "email_pending": False}
 
-    # 1. Update Username immediately 
     if new_username and new_username != user.username:
         user.username = new_username
         user.save()
         response_data["message"] += "Username updated successfully. "
 
-    # 2. Handle Email Change securely (FIXED INDENTATION)
     if new_email and new_email != user.email:
         if User.objects.filter(email=new_email).exists():
             return Response({"success": False, "error": "Email already in use"}, status=400)
 
-        # Generate a secure token containing user ID and the new Email
         token = signer.sign_object({'user_id': user.id, 'new_email': new_email})
 
-        # Example: http://localhost:3000/verify-email?token=abc
         verification_link = f"{settings.FRONTEND_URL}/verify-email?token={token}"
 
-        #set Up Brevo API 
         brevo_url="https://api.brevo.com/v3/smtp/email"
         headers ={
             "accept": "application/json",
             "api-key": settings.BREVO_API_KEY,
             "content-type":"application/json"
         }
-        #tell brevo which template to use
         payload = {
             "to": [{"email": new_email}],
             "templateId": 1, 
             "params": {
-                "link": verification_link, # This injects your URL into {{ params.link }}
+                "link": verification_link,
                 "firstname": user.username
             }
         }
-        # 4. Fire the request!
         response = requests.post(brevo_url, json=payload, headers=headers)
-        # (Optional) Print the response to your terminal so you can see if it worked
         print(response.json())
         response_data["message"] += "A verification link was sent to your new email."
         response_data["email_pending"] = True
         
-    # FIXED INDENTATION: This must happen regardless of what was updated
     return Response(response_data)
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def verify_email_change(request):
-    # FIXED TYPO
     token = request.data.get('token')
     
     try:
-        # Token is valid for 24 hours (86400 seconds)
         data = signer.unsign_object(token, max_age=86400)
         
         user = User.objects.get(id=data['user_id'])

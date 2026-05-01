@@ -2,11 +2,9 @@ from django.db import models
 
 from django.contrib.auth import get_user_model
 
-# Always use get_user_model() instead of importing the User model directly
 User = get_user_model() 
 
 class AnalysisHistory(models.Model):
-    # Define strict status choices for the Next.js frontend to read
     class StatusChoices(models.TextChoices):
         PENDING = 'PENDING', 'Pending'
         PROCESSING = 'PROCESSING', 'Processing'
@@ -16,7 +14,6 @@ class AnalysisHistory(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='seo_history')
     url_analyzed = models.URLField()
     
-    # --- New Fields for Async Processing ---
     task_id = models.CharField(max_length=255, null=True, blank=True, help_text="Celery Task ID")
     status = models.CharField(
         max_length=20, 
@@ -24,13 +21,11 @@ class AnalysisHistory(models.Model):
         default=StatusChoices.PENDING
     )
 
-    # --- Results ---
     seo_score = models.IntegerField(null=True, blank=True)
     recommendations_summary = models.JSONField(default=dict, blank=True) 
     
-    # --- Timestamps ---
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True) # Tracks when the status changes to COMPLETED
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']

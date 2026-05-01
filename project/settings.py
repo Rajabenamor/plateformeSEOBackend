@@ -15,26 +15,14 @@ import os
 from dotenv import load_dotenv
 from datetime import timedelta
 
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
-
-# Load the variables from .env
 load_dotenv()
 
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('SECRET_KEY')
-# SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
 ALLOWED_HOSTS = []
-
-
-# Application definition
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -46,15 +34,13 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'rest_framework',
     'corsheaders',
-    # 'authentication',
     'authentication.apps.AuthenticationConfig',
     'django_rest_passwordreset',
-   'rest_framework_simplejwt',
-   'django_extensions',
-   'analysis',
+    'rest_framework_simplejwt',
+    'django_extensions',
+    'analysis',
 ]
 
-#password reset token
 DJANGO_REST_PASSWORDRESET_TOKEN_CONFIG ={
     "CLASS" : "django_rest_passwordreset.tokens.RandomStringTokenGenerator",
     "OPTIONS":{
@@ -79,7 +65,7 @@ ROOT_URLCONF = 'project.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'templates')], #introducing the folder templates to django
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -93,28 +79,12 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'project.wsgi.application'
 
-
-# Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-
-# Comment this out temporarily
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         ...
-#     }
-# }
-
-# Add this for a quick local test
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
-
-# Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -131,21 +101,10 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
-# Internationalization
-# https://docs.djangoproject.com/en/6.0/topics/i18n/
-
 LANGUAGE_CODE = 'en-us'
-
 TIME_ZONE = 'UTC'
-
 USE_I18N = True
-
 USE_TZ = True
-
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
 
@@ -153,62 +112,42 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
-    #tells Django exactly how to "read" the JSON you are sending from Next.js.
     'DEFAULT_PARSER_CLASSES': (
         'rest_framework.parsers.JSONParser',
-
     ),
 }
-#google sign in 
-GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
 
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
 FRONTEND_URL ="http://localhost:3000"
 
-#Authorize django to speak with next.js
 CORS_ALLOWED_ORIGINS=[
     "http://localhost:3000",
 ]
-
-# without this, cookies are blocked by the browser
 CORS_ALLOW_CREDENTIALS = True
 
-#simple_jwt config
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin-allow-popups"
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,    #every refresh geta a new refresh token
-    'BLACKLIST_AFTER_ROTATION': True, #old refresh token can't be reused
+    'ACCESS_TOKEN_LIFETIME': timedelta(seconds=10),
+    'REFRESH_TOKEN_LIFETIME': timedelta(seconds=30),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-
-
-#token expiration time : 30 minutes
 DJANGO_REST_PASSWORDRESET_TOKEN_EXPIRY_TIME = 0.5
-#Reset Password
 
-
-
-#Reset Password email (brevo) 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST =  'smtp-relay.brevo.com' #smtp server
+EMAIL_HOST =  'smtp-relay.brevo.com'
 EMAIL_PORT = '587' 
 EMAIL_USE_TLS = True
 
-# brevo api key
 BREVO_API_KEY =os.getenv('BREVO_API_KEY')
-# #pulling values from .env file
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER') #brevo email
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD') #brevo smtp key value
-#the email address users will see in the form field
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
-
-# #test (console)
-# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-
 
 LOGGING = {
     'version': 1,
@@ -229,9 +168,7 @@ LOGGING = {
 GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID')
 GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET')
 
-#upstach 
 CELERY_BROKER_URL= os.getenv("CELERY_BROKER_URL")
-# Security and performance best practices
 CELERY_BROKER_USE_SSL = {
     'ssl_cert_reqs': None
 }

@@ -6,5 +6,4 @@ class AuthenticationConfig(AppConfig):
     name = 'authentication'
 
     def ready(self):
-        #this imports the signals when the app starts so the brevo email can be sent to the user
         import authentication.signals
