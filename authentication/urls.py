@@ -17,6 +17,8 @@ urlpatterns = [
     path('api/dashboard/', views.dashboard_api, name='dashboard_api'),
     #user updates his own profile
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
+    path('users/update-profile/', views.update_profile, name='update_profile'),
+    path('users/verify-email/', views.verify_email_change, name='verify_email_change'),
     #user intgration of ga4 and github 
     path('users/integrations/status/', IntegrationStatusView.as_view(), name='integration-status'),
     path('integrations/github/exchange/', GithubExchangeView.as_view(), name='github-exchange'),

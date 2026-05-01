@@ -19,6 +19,10 @@ from django.http import JsonResponse
 from .services import calculate_seo_metrics
 from rest_framework.permissions import IsAuthenticated
 from .models import UserIntegration
+from django.core.mail import send_mail
+from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view, permission_classes
+from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (AllowAny,) # Allows anyone (even guests) to access the registration page
@@ -47,7 +51,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # "or self.user.username" provides a fallback if they haven't set a name at all
         data['user'] = {
             'email': self.user.email,
-            'full_name': f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username,
+            'username': f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username,
             'plan': 'Free Plan' # You can tie this to a real Subscription model later
         }
         
@@ -115,7 +119,7 @@ class GoogleAuthView(APIView):
             'refresh': str(refresh),
             'user': {
                 'email': user.email,
-                'full_name': f"{user.first_name} {user.last_name}".strip() or user.username,
+                'username': f"{user.first_name} {user.last_name}".strip() or user.username,
                 'plan': 'Free Plan' # Default plan for new Google sign-ups
             }
         }, status=status.HTTP_200_OK)
@@ -149,7 +153,7 @@ def dashboard_api(request):
     return JsonResponse(dashboard_payload)
 
 #user updates his own profile
-class UserProfileView(generics.RetrieveUpdateAPIView):
+class UserProfileView(generics.RetrieveAPIView):
     """
     Handles GET and PATCH for the currently logged-in user.
     No ID is needed in the URL.
@@ -360,3 +364,84 @@ class SaveGithubRepoView(APIView):
             
         except UserIntegration.DoesNotExist:
             return Response({"error": "GitHub is not connected yet."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+#profile settings 
+signer = TimestampSigner()
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def update_profile(request):
+    user = request.user
+    new_username = request.data.get('username')
+    new_email = request.data.get('email')
+
+    response_data = {"success": True, "message": "", "email_pending": False}
+
+    # 1. Update Username immediately 
+    if new_username and new_username != user.username:
+        user.username = new_username
+        user.save()
+        response_data["message"] += "Username updated successfully. "
+
+    # 2. Handle Email Change securely (FIXED INDENTATION)
+    if new_email and new_email != user.email:
+        if User.objects.filter(email=new_email).exists():
+            return Response({"success": False, "error": "Email already in use"}, status=400)
+
+        # Generate a secure token containing user ID and the new Email
+        token = signer.sign_object({'user_id': user.id, 'new_email': new_email})
+
+        # Example: http://localhost:3000/verify-email?token=abc
+        verification_link = f"{settings.FRONTEND_URL}/verify-email?token={token}"
+
+        #set Up Brevo API 
+        brevo_url="https://api.brevo.com/v3/smtp/email"
+        headers ={
+            "accept": "application/json",
+            "api-key": settings.BREVO_API_KEY,
+            "content-type":"application/json"
+        }
+        #tell brevo which template to use
+        payload = {
+            "to": [{"email": new_email}],
+            "templateId": 1, 
+            "params": {
+                "link": verification_link, # This injects your URL into {{ params.link }}
+                "firstname": user.username
+            }
+        }
+        # 4. Fire the request!
+        response = requests.post(brevo_url, json=payload, headers=headers)
+        # (Optional) Print the response to your terminal so you can see if it worked
+        print(response.json())
+        response_data["message"] += "A verification link was sent to your new email."
+        response_data["email_pending"] = True
+        
+    # FIXED INDENTATION: This must happen regardless of what was updated
+    return Response(response_data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_email_change(request):
+    # FIXED TYPO
+    token = request.data.get('token')
+    
+    try:
+        # Token is valid for 24 hours (86400 seconds)
+        data = signer.unsign_object(token, max_age=86400)
+        
+        user = User.objects.get(id=data['user_id'])
+
+        verified_new_email = data['new_email']
+
+        user.email = verified_new_email
+        user.save()
+        
+        return Response({"success": True, "message": "Email updated successfully.","new_email": verified_new_email})
+        
+    except (SignatureExpired, BadSignature):
+        return Response({"success": False, "error": "Invalid or expired token."}, status=400)
+    except User.DoesNotExist:
+        return Response({"success": False, "error": "User no longer exists."}, status=404)
