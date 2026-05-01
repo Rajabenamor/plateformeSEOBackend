@@ -19,6 +19,7 @@ urlpatterns = [
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
     path('users/update-profile/', views.update_profile, name='update_profile'),
     path('users/verify-email/', views.verify_email_change, name='verify_email_change'),
+    path('users/change-password/', views.ChangePasswordView.as_view(), name='change_password'),
     #user intgration of ga4 and github 
     path('users/integrations/status/', IntegrationStatusView.as_view(), name='integration-status'),
     path('integrations/github/exchange/', GithubExchangeView.as_view(), name='github-exchange'),
