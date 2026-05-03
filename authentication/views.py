@@ -241,9 +241,9 @@ class CreateGithubPRView(APIView):
     def post(self, request):
         fix_title = request.data.get('title', 'SEO Fix')
         fix_explanation = request.data.get('explanation', '')
-        target_file_path = request.data.get('target_file', 'src/app/page.tsx') 
-        
-        random_id = uuid.uuid4().hex[:6]
+        target_file_path = request.data.get('target_file', 'src/app/page.tsx')
+        current_code = request.data.get('current_code')
+        suggested_code = request.data.get('suggested_code')
 
         try:
             integration = request.user.integrations
@@ -253,103 +253,21 @@ class CreateGithubPRView(APIView):
             if not github_token or not target_repo:
                 return Response({"error": "GitHub not connected or repo not selected."}, status=status.HTTP_403_FORBIDDEN)
 
-            headers = {
-                "Authorization": f"token {github_token}",
-                "Accept": "application/vnd.github.v3+json"
-            }
-
-            repo_res = requests.get(f"https://api.github.com/repos/{target_repo}", headers=headers)
-            if repo_res.status_code != 200:
-                print(f"GITHUB REPO ERROR: {repo_res.text}")
-                return Response({"error": f"Could not access repo '{target_repo}'. GitHub says: {repo_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
-            
-            default_branch = repo_res.json().get("default_branch", "main")
-
-            ref_url = f"https://api.github.com/repos/{target_repo}/git/refs/heads/{default_branch}"
-            ref_res = requests.get(ref_url, headers=headers)
-            if ref_res.status_code != 200:
-                print(f"GITHUB BRANCH ERROR: {ref_res.text}")
-                return Response({"error": f"Could not find branch '{default_branch}'. GitHub says: {ref_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
-            
-            latest_sha = ref_res.json()['object']['sha']
-
-            file_url = f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}?ref={default_branch}"
-            file_res = requests.get(file_url, headers=headers)
-            
-            if file_res.status_code != 200:
-                print(f"GITHUB FILE ERROR: {file_res.text}")
-                return Response({"error": f"Could not find {target_file_path} in the repository."}, status=status.HTTP_400_BAD_REQUEST)
-
-            file_data = file_res.json()
-            file_sha = file_data['sha']
-            raw_source_code = base64.b64decode(file_data['content']).decode('utf-8')
-
-            genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
-            model = genai.GenerativeModel('gemini-2.5-flash-lite')
-            
-            prompt = f"""
-            You are an expert Next.js/React developer.
-            I need to fix the following SEO issue in the code:
-            Issue: {fix_title}
-            Details: {fix_explanation}
-
-            Here is the EXACT source code of `{target_file_path}` from the repository:
-            ```
-            {raw_source_code}
-            ```
-
-            Rewrite the file to fix the SEO issue. 
-            CRITICAL: Return ONLY the raw, updated code. Do NOT include markdown code blocks (like ```javascript). Do NOT include any text explanations. The output must compile perfectly.
-            """
-            
-            ai_response = model.generate_content(prompt)
-            fixed_code = ai_response.text.strip()
-            
-            if fixed_code.startswith("```"):
-                fixed_code = "\n".join(fixed_code.split("\n")[1:-1])
-
-            new_branch_name = f"strive-seo-fix-{random_id}"
-            branch_res = requests.post(
-                f"https://api.github.com/repos/{target_repo}/git/refs",
-                headers=headers,
-                json={"ref": f"refs/heads/{new_branch_name}", "sha": latest_sha}
-            )
-            
-            if branch_res.status_code != 201:
-                print(f"GITHUB BRANCH CREATION ERROR: {branch_res.text}")
-                return Response({"error": f"Failed to create branch. GitHub says: {branch_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
-
-            encoded_code = base64.b64encode(fixed_code.encode('utf-8')).decode('utf-8')
-            commit_data = {
-                "message": f"Strive AI SEO Fix: {fix_title}",
-                "content": encoded_code,
-                "branch": new_branch_name,
-                "sha": file_sha
-            }
-            
-            commit_res = requests.put(
-                f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}",
-                headers=headers,
-                json=commit_data
+            from .services.github_service import GitHubService
+            result = GitHubService.create_pull_request(
+                github_token=github_token,
+                target_repo=target_repo,
+                fix_title=fix_title,
+                fix_explanation=fix_explanation,
+                target_file_path=target_file_path,
+                current_code=current_code,
+                suggested_code=suggested_code
             )
 
-            if commit_res.status_code not in [200, 201]:
-                print(f"GITHUB COMMIT ERROR: {commit_res.text}")
-                return Response({"error": f"Commit failed: {commit_res.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
-
-            pr_data = {
-                "title": f"🚀 Strive SEO Auto-Fix: {fix_title}",
-                "body": f"This PR was generated automatically by Strive AI.\n\n**File modified:** `{target_file_path}`\n\nThe AI read your source code and applied the necessary optimizations. Review the changes before merging.",
-                "head": new_branch_name,
-                "base": default_branch
-            }
-            pr_response = requests.post(f"https://api.github.com/repos/{target_repo}/pulls", headers=headers, json=pr_data)
-            
-            if pr_response.status_code == 201:
-                return Response({"message": "Success!", "pr_url": pr_response.json().get("html_url")}, status=status.HTTP_201_CREATED)
+            if result.get("success"):
+                return Response({"message": "Success!", "pr_url": result.get("pr_url")}, status=status.HTTP_201_CREATED)
             else:
-                print(f"GITHUB PR ERROR: {pr_response.text}")
-                return Response({"error": f"Failed to open PR: {pr_response.json().get('message')}"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": result.get("error")}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
             print(f"CRITICAL SERVER ERROR: {str(e)}")

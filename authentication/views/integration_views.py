@@ -47,7 +47,9 @@ class CreateGithubPRView(APIView):
     def post(self, request):
         fix_title = request.data.get('title', 'SEO Fix')
         fix_explanation = request.data.get('explanation', '')
-        target_file = request.data.get('target_file', 'src/app/page.tsx') 
+        target_file = request.data.get('target_file', 'src/app/page.tsx')
+        current_code = request.data.get('current_code')
+        suggested_code = request.data.get('suggested_code')
 
         try:
             integration = request.user.integrations
@@ -57,7 +59,8 @@ class CreateGithubPRView(APIView):
             result = GitHubService.create_pull_request(
                 integration.github_access_token,
                 integration.github_repo_linked,
-                fix_title, fix_explanation, target_file
+                fix_title, fix_explanation, target_file,
+                current_code, suggested_code
             )
 
             if result["success"]:
@@ -66,7 +69,6 @@ class CreateGithubPRView(APIView):
 
         except UserIntegration.DoesNotExist:
             return Response({"error": "GitHub not connected."}, status=status.HTTP_403_FORBIDDEN)
-
 class SaveGithubRepoView(APIView):
     permission_classes = [IsAuthenticated]
     def post(self, request):

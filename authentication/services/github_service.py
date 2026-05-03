@@ -3,8 +3,8 @@ import requests
 import base64
 import os
 from django.conf import settings
-import google.generativeai as genai
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+from urllib.parse import urlparse
 
 class GitHubService:
     @staticmethod
@@ -26,12 +26,55 @@ class GitHubService:
             return None
 
     @staticmethod
+    def get_file_content_from_url(github_token: str, target_repo: str, url: str) -> Tuple[Optional[str], Optional[str]]:
+        """Maps a URL to a likely Next.js file path and fetches its content."""
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        parsed_url = urlparse(url)
+        path = parsed_url.path.strip("/")
+        
+        # Attempt to map to Next.js App Router structure
+        possible_paths = []
+        if not path:
+            possible_paths = ["src/app/page.tsx", "app/page.tsx", "pages/index.tsx"]
+        else:
+            possible_paths = [
+                f"src/app/{path}/page.tsx",
+                f"app/{path}/page.tsx",
+                f"src/app/{path}/layout.tsx",
+                f"app/{path}/layout.tsx",
+                f"pages/{path}.tsx",
+                f"pages/{path}/index.tsx"
+            ]
+            
+        repo_res = requests.get(f"https://api.github.com/repos/{target_repo}", headers=headers)
+        if repo_res.status_code != 200:
+            return None, None
+            
+        default_branch = repo_res.json().get("default_branch", "main")
+        
+        for file_path in possible_paths:
+            file_url = f"https://api.github.com/repos/{target_repo}/contents/{file_path}?ref={default_branch}"
+            file_res = requests.get(file_url, headers=headers)
+            if file_res.status_code == 200:
+                file_data = file_res.json()
+                content = base64.b64decode(file_data['content']).decode('utf-8')
+                return content, file_path
+                
+        return None, None
+
+    @staticmethod
     def create_pull_request(
         github_token: str,
         target_repo: str,
         fix_title: str,
         fix_explanation: str,
-        target_file_path: str
+        target_file_path: str,
+        current_code: str = None,
+        suggested_code: str = None
     ) -> Dict[str, Any]:
         try:
             headers = {
@@ -64,10 +107,17 @@ class GitHubService:
             file_sha = file_data['sha']
             raw_source_code = base64.b64decode(file_data['content']).decode('utf-8')
 
-            # 4. Generate AI fix
-            fixed_code = GitHubService._generate_ai_fix(fix_title, fix_explanation, target_file_path, raw_source_code)
+            # 4. Generate AI fix OR Use string replacement
+            if current_code and suggested_code:
+                if current_code not in raw_source_code:
+                    return {"success": False, "error": "The specified code snippet was not found in the target file. The file may have been updated."}
+                fixed_code = raw_source_code.replace(current_code, suggested_code, 1)
+            else:
+                # Fallback to AI rewrite if string replacement is not provided (Legacy)
+                fixed_code = GitHubService._generate_ai_fix(fix_title, fix_explanation, target_file_path, raw_source_code)
+                
             if not fixed_code:
-                 return {"success": False, "error": "AI failed to generate a fix."}
+                 return {"success": False, "error": "Failed to generate or apply the fix."}
 
             # 5. Create new branch
             random_id = uuid.uuid4().hex[:6]
@@ -116,6 +166,8 @@ class GitHubService:
 
     @staticmethod
     def _generate_ai_fix(title: str, explanation: str, file_path: str, source_code: str) -> Optional[str]:
+        # Legacy fallback
+        import google.generativeai as genai
         try:
             genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
             model = genai.GenerativeModel('gemini-2.5-flash-lite')
