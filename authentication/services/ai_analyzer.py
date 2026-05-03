@@ -1,8 +1,30 @@
 import os
 import json
 import google.generativeai as genai
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
+
+class TrafficDecayAlert(BaseModel):
+    url: str
+    drop_percentage: float = Field(..., description="Percentage drop over 30 days")
+    recommended_action: str
+
+class CannibalizationWarning(BaseModel):
+    keyword: str
+    competing_urls: List[str]
+    recommended_action: str
+
+class MissedClicksMetric(BaseModel):
+    keyword: str
+    url: str
+    current_position: float
+    current_ctr: float
+    potential_traffic_gain: int = Field(..., description="Estimated extra clicks if CTR hit industry average")
+
+class CompetitorBlindSpot(BaseModel):
+    target_keyword: str
+    missing_topics: List[str]
+    competitor_urls: List[str]
 
 class FixObject(BaseModel):
     issue_type: str = Field(..., description="Category of the issue: e.g., 'Performance', 'Meta-Tag', 'Accessibility', 'Semantic-HTML'")
@@ -16,7 +38,59 @@ class AIAnalysisResponse(BaseModel):
     content_score: int
     seo_fixes: list[FixObject]
 
+class IntelligenceResponse(BaseModel):
+    traffic_velocity: str = Field(..., description="'trending_up', 'trending_down', 'flat'")
+    traffic_decay: List[TrafficDecayAlert]
+    cannibalization: List[CannibalizationWarning]
+    missed_clicks: List[MissedClicksMetric]
+    competitor_blind_spots: List[CompetitorBlindSpot]
+    global_health_score: int
+
 class AIAnalyzerService:
+    @staticmethod
+    def analyze_intelligence(traffic_data: List[Dict], pagespeed_data: Dict) -> Dict[str, Any]:
+        try:
+            genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+            model = genai.GenerativeModel('gemini-1.5-pro')
+
+            prompt = f"""
+            You are a Neural SEO Intelligence Engine. Your task is to analyze RAW DATA and generate REAL insights. 
+            NO MOCKUPS. NO PLACEHOLDERS.
+
+            INPUT DATA:
+            - Traffic Data (GA4): {json.dumps(traffic_data)}
+            - PageSpeed Data: {json.dumps(pagespeed_data)}
+
+            TASKS:
+            1. Analyze traffic trends to determine 'traffic_velocity'.
+            2. Identify 'traffic_decay' by looking for specific pages with declining users.
+            3. Detect potential 'cannibalization' if multiple pages appear to target similar concepts (infer from PageSpeed URLs if GSC is missing).
+            4. Calculate 'missed_clicks' by estimating potential traffic gain if current performance bottlenecks (from PageSpeed) were resolved.
+            5. Identify 'competitor_blind_spots' based on industry standards for the detected niche.
+            6. Calculate a 'global_health_score' (0-100) combining performance and traffic stability.
+
+            Return ONLY a JSON object matching the IntelligenceResponse schema.
+            """
+
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema=IntelligenceResponse
+                )
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            print(f"Intelligence Analysis Error: {e}")
+            return {
+                "traffic_velocity": "flat",
+                "traffic_decay": [],
+                "cannibalization": [],
+                "missed_clicks": [],
+                "competitor_blind_spots": [],
+                "global_health_score": 50
+            }
+
     @staticmethod
     def analyze_seo(source_code: str, file_path: str, pagespeed_issues: Dict[str, Any], ignored_issues: List[Dict[str, str]] = None) -> Dict[str, Any]:
         try:
