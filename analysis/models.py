@@ -33,3 +33,17 @@ class AnalysisHistory(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.url_analyzed} [{self.status}]"
+
+class IgnoredRecommendation(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ignored_recommendations')
+    issue_type = models.CharField(max_length=100)
+    file_path = models.CharField(max_length=255)
+    explanation = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ('user', 'issue_type', 'file_path')
+
+    def __str__(self):
+        return f"{self.user.username} ignored {self.issue_type} on {self.file_path}"
