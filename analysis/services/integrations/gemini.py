@@ -2,6 +2,7 @@ import os
 import json
 import google.generativeai as genai
 import uuid
+import hashlib
 
 class GeminiService:
     """
@@ -9,34 +10,38 @@ class GeminiService:
     """
     
     SYSTEM_PROMPT = """
-    You are a Principal Technical SEO Strategist and Senior Backend Engineer. Your objective is to act as a hands-free, automated SEO Co-Pilot for a non-technical website owner.
+    You are an Elite Technical SEO Architect and Senior Full-Stack Engineer. Your objective is to provide high-impact, sophisticated SEO transformations that go beyond basic meta tags.
 
-    You will be provided with raw data about a target URL, including PageSpeed Insights and general context.
+    You will be provided with raw data about a target URL, including PageSpeed Insights, Accessibility metrics, and semantic structure.
 
-    Your task is to analyze this data, identify specific SEO vulnerabilities for the given URL, and generate a list of Actionable Quick Wins in strict JSON format. 
+    Your task is to analyze this data and identify "Deep Fixes" – changes that significantly move the needle on both search visibility and user experience. 
 
-    You must translate technical jargon into clear business value. Every proposed code change MUST be a safe, surgical, string-level replacement designed to be committed via an automated GitHub Pull Request.
+    EXPANDED SCOPE OF ALLOWED CHANGES:
+    1. ADVANCED METADATA: Open Graph (og:), Twitter Cards, and theme-color optimizations for mobile branding.
+    2. SEMANTIC ARCHITECTURE: Rethinking <h1>-<h6> hierarchy, implementing <main>, <article>, and <aside> for better document outlining.
+    3. HIGH-PERFORMANCE TAGS: Injecting `fetchpriority="high"` for LCP images, `decoding="async"` for non-critical images, and resource hints (<link rel="preconnect">).
+    4. RICH SCHEMAS: Implementing complex JSON-LD (FAQPage, SoftwareApplication, Organization with SameAs, BreadcrumbList) tailored to the page content.
+    5. INTERACTIVE ACCESSIBILITY: Fixing aria-labels on buttons and decorative vs. informative image handling.
 
-    CRITICAL RULES FOR CODE FIXES:
-    1. SAFE CHANGES ONLY: You are strictly limited to suggesting changes to Meta tags (<title>, <meta description>), Semantic HTML (adjusting <h1> through <h6> order), Image attributes (injecting missing alt="..."), and Structured Data (JSON-LD scripts).
-    2. NO LAYOUT DESTRUCTION: You MUST NOT suggest complex CSS refactoring, massive structural layout changes, or anything that could alter the visual design of the user's application.
-    3. LITERAL STRINGS: The `code_fix` field MUST contain the EXACT, literal string that will replace the existing code. Do not use placeholders, ellipses (...), or conversational explanations in this field.
-    4. EXACT PATHS: The `target_file` field must be the precise file path inferred from the URL context (e.g., if the URL is /about, the file is likely src/app/about/page.tsx, if it is / it is src/app/page.tsx).
+    PROMPT RULES:
+    - NO BULLSHIT: Avoid generic advice like "Add a meta description." Instead, suggest a high-converting, keyword-rich description based on the page context.
+    - SURGICAL CODE: Every `code_fix` MUST be a literal, ready-to-paste code snippet. 
+    - STRATEGIC VALUE: Explain the "Why" in terms of "Top-of-Funnel Traffic" or "Indexing Efficiency."
+    - EXACT PATHS: Infer the React/Next.js file path (e.g., `src/app/page.tsx` for home, `src/app/blog/[slug]/page.tsx` for dynamic routes).
 
     OUTPUT FORMAT:
-    You must output a raw JSON object containing an `action_items` array. Each item must match this schema exactly:
-
+    Return a raw JSON object (no markdown) with an `action_items` array:
     {
       "action_items": [
         {
-          "id": "A unique string identifier",
-          "title": "Clear, non-technical title (e.g., 'Unclicked Potential: Fix Meta Title')",
-          "impact_score": 8,
-          "effort_level": "Low",
-          "explanation": "Explain WHY this matters in simple terms.",
-          "technical_details": "Explain the exact technical change.",
-          "code_fix": "<title>Buy Premium Organic Coffee Beans | Fast Shipping</title>",
-          "target_file": "src/app/products/page.tsx"
+          "id": "uuid",
+          "title": "Provocative, high-signal title",
+          "impact_score": 1-10,
+          "effort_level": "Low/Medium/High",
+          "explanation": "Deep strategic rationale.",
+          "technical_details": "Exact implementation details.",
+          "code_fix": "LITERAL_CODE_SNIPPET",
+          "target_file": "path/to/file.tsx"
         }
       ]
     }
@@ -48,11 +53,11 @@ class GeminiService:
             print("WARNING: GEMINI_API_KEY is not set. Falling back to mock recommendations.")
         else:
             genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-pro') # Using pro for reasoning
+            self.model = genai.GenerativeModel('gemini-1.5-pro') # Upgraded to Pro for deeper reasoning
 
-    def generate_action_items(self, target_url: str, pagespeed_data: dict) -> list[dict]:
+    def generate_action_items(self, target_url: str, pagespeed_data: dict, raw_html: str = None) -> list[dict]:
         """
-        Uses Gemini to generate dynamic action items based on the provided URL and performance data.
+        Uses Gemini to generate dynamic action items based on the provided URL, performance data, and HTML structure.
         """
         if not self.api_key:
             return self._get_mock_items(target_url)
@@ -60,12 +65,15 @@ class GeminiService:
         try:
             # Construct the user prompt with the real data
             user_prompt = f"""
-            Analyze the following URL and performance data to generate 2 highly specific, safe code-fix recommendations.
+            Analyze the following URL, performance data, and HTML structure to generate 2 highly specific, safe code-fix recommendations.
 
             Target URL: {target_url}
 
             Performance Data context:
             {json.dumps(pagespeed_data, indent=2)}
+
+            HTML Structure (Trimmmed for context):
+            {raw_html[:10000] if raw_html else "No HTML data available"}
 
             Generate 2 JSON action items strictly adhering to the SYSTEM PROMPT rules. Do not include markdown blocks like ```json in the output. Return only the raw JSON string.
             """
@@ -86,10 +94,11 @@ class GeminiService:
 
             data = json.loads(response_text)
             
-            # Ensure unique IDs just in case
+            # Ensure STABLE IDs based on content
             for item in data.get('action_items', []):
-                if 'id' not in item or not item['id']:
-                    item['id'] = str(uuid.uuid4())
+                # Create a stable hash from title and target_file
+                seed = f"{item.get('title', '')}{item.get('target_file', '')}".encode('utf-8')
+                item['id'] = hashlib.md5(seed).hexdigest()
                 item['status'] = "pending"
 
             return data.get('action_items', self._get_mock_items(target_url))

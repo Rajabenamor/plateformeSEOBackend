@@ -51,7 +51,8 @@ class AIAnalyzerService:
     def analyze_intelligence(traffic_data: List[Dict], pagespeed_data: Dict) -> Dict[str, Any]:
         try:
             genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-            model = genai.GenerativeModel('gemini-1.5-pro')
+            # Switching to flash for better availability and speed
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
             prompt = f"""
             You are a Neural SEO Intelligence Engine. Your task is to analyze RAW DATA and generate REAL insights. 
@@ -95,8 +96,8 @@ class AIAnalyzerService:
     def analyze_seo(source_code: str, file_path: str, pagespeed_issues: Dict[str, Any], ignored_issues: List[Dict[str, str]] = None) -> Dict[str, Any]:
         try:
             genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-            # Using gemini-1.5-pro for better structured output adherence and reasoning
-            model = genai.GenerativeModel('gemini-1.5-pro')
+            # Switching to flash for better availability and speed
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
             ignored_context = ""
             if ignored_issues:

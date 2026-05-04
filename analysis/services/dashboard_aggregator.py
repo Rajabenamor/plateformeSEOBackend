@@ -1,36 +1,69 @@
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 from .schemas import DashboardIntelligencePayload
 from .integrations.ga4 import GA4Service
 from .integrations.pagespeed import PageSpeedService
+from .integrations.gemini import GeminiService
 from authentication.services.ai_analyzer import AIAnalyzerService
+from authentication.services.scrapers import ScraperService
+
+# Simple in-memory cache to prevent redundant slow API calls
+_ANALYSIS_CACHE = {}
+_CACHE_TTL = 300  # 5 minutes
 
 class DashboardAggregatorService:
     def __init__(self):
         # Initialize API clients
         self.ga4_service = GA4Service()
         self.pagespeed_service = PageSpeedService()
+        self.gemini_service = GeminiService()
+        self.scraper_service = ScraperService()
 
     def build_payload(self, target_url: str) -> dict:
         """
         Main orchestration method to build the final Pydantic payload with REAL intelligence.
+        Uses parallel execution and caching to minimize latency and prevent timeouts.
         """
-        # 1. Fetch real data from APIs
-        real_traffic_data = self.ga4_service.get_traffic_last_30_days()
-        pagespeed_data = self.pagespeed_service.fetch_data(target_url)
-        
+        # Check cache first
+        now = time.time()
+        if target_url in _ANALYSIS_CACHE:
+            cached_data, timestamp = _ANALYSIS_CACHE[target_url]
+            if now - timestamp < _CACHE_TTL:
+                print(f"DEBUG: Returning cached payload for {target_url}")
+                return cached_data
+
+        # 1. Fetch real data from APIs in parallel
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_ga4 = executor.submit(self.ga4_service.get_traffic_last_30_days)
+            future_pagespeed = executor.submit(self.pagespeed_service.fetch_data, target_url)
+            future_html = executor.submit(self.scraper_service.fetch_html_with_zyte, target_url)
+
+            real_traffic_data = future_ga4.result()
+            pagespeed_data = future_pagespeed.result()
+            raw_html = future_html.result()
+
         # 2. Use Neural Engine to analyze raw data for intelligence insights
-        intelligence = AIAnalyzerService.analyze_intelligence(
-            traffic_data=real_traffic_data,
-            pagespeed_data=pagespeed_data
-        )
+        # and generate dynamic action items in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_intelligence = executor.submit(
+                AIAnalyzerService.analyze_intelligence,
+                traffic_data=real_traffic_data,
+                pagespeed_data=pagespeed_data
+            )
 
-        # 3. Use PageSpeed dynamic action items (keeping this for now as it's already integrated)
-        # We'll use the legacy GeminiService logic but wrap it in the new intelligence structure
-        from .integrations.gemini import GeminiService
-        gemini_service = GeminiService()
-        dynamic_action_items = gemini_service.generate_action_items(target_url, pagespeed_data)
+            # Pass the HTML content to Gemini for structural analysis
+            future_action_items = executor.submit(
+                self.gemini_service.generate_action_items,
+                target_url, 
+                pagespeed_data,
+                raw_html=raw_html
+            )
 
-        # 4. Construct the payload using REAL data only
+            intelligence = future_intelligence.result()
+            dynamic_action_items = future_action_items.result()
+
+        # 3. Construct the payload using REAL data only
         payload_data = {
             "global_health_score": intelligence.get("global_health_score", 50),
             "technical_health": pagespeed_data["technical_health"] if pagespeed_data else 0,
@@ -50,7 +83,13 @@ class DashboardAggregatorService:
             },
             "critical_action_items": dynamic_action_items
         }
-        
-        # 5. Validate and construct the final payload
+
+        # 4. Validate and construct the final payload
         payload = DashboardIntelligencePayload(**payload_data)
-        return payload.model_dump()
+        result = payload.model_dump()
+        
+        # Save to cache
+        _ANALYSIS_CACHE[target_url] = (result, now)
+        
+        return result
+
