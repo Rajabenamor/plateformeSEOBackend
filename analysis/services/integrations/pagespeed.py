@@ -1,5 +1,6 @@
 import os
 import requests
+from concurrent.futures import ThreadPoolExecutor
 
 class PageSpeedService:
     """
@@ -18,10 +19,13 @@ class PageSpeedService:
             print("WARNING: PAGESPEED_API_KEY is not set. Falling back to mock data.")
             return None
 
-        # Fetch Mobile
-        mobile_data = self._fetch_strategy(target_url, "mobile")
-        # Fetch Desktop
-        desktop_data = self._fetch_strategy(target_url, "desktop")
+        # Fetch Mobile and Desktop in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_mobile = executor.submit(self._fetch_strategy, target_url, "mobile")
+            future_desktop = executor.submit(self._fetch_strategy, target_url, "desktop")
+            
+            mobile_data = future_mobile.result()
+            desktop_data = future_desktop.result()
 
         if not mobile_data or not desktop_data:
              return None
