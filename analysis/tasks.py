@@ -9,7 +9,7 @@ def run_seo_analysis(analysis_id):
     record.status = 'PROCESSING'
     record.save()
 
-    results = calculate_seo_metrics(record.url_analyzed)
+    results = calculate_seo_metrics(record.url_analyzed, user=record.user)
 
     record.seo_score = results['overall_score']
     record.recommendations_summary = {

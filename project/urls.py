@@ -20,10 +20,10 @@ from django.urls import path , include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('password_reset/',include('django_rest_passwordreset.urls',namespace='password_reset')),
+    path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
     
     path('api/auth/', include('authentication.urls')),
     path('api/admin/', include('authentication.admin_urls')),
-     path('', include('authentication.urls')),
-     path('api/analysis/', include('analysis.urls')),
- ]
+    path('api/analysis/', include('analysis.urls')),
+    path('', include('authentication.urls')), # Fallback for frontend
+]
