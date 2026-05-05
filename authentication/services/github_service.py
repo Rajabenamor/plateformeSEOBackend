@@ -82,10 +82,14 @@ class GitHubService:
                 "Accept": "application/vnd.github.v3+json"
             }
 
+            print(f"DEBUG [GitHubService]: Creating PR for {target_repo} - File: {target_file_path}")
+
             # 1. Get repo info and default branch
             repo_res = requests.get(f"https://api.github.com/repos/{target_repo}", headers=headers)
             if repo_res.status_code != 200:
-                return {"success": False, "error": f"Could not access repo: {repo_res.json().get('message')}"}
+                err_msg = repo_res.json().get('message', 'Unknown error')
+                print(f"ERROR [GitHubService]: Repo access failed: {err_msg}")
+                return {"success": False, "error": f"Could not access repo: {err_msg}"}
             
             default_branch = repo_res.json().get("default_branch", "main")
 
@@ -93,7 +97,8 @@ class GitHubService:
             ref_url = f"https://api.github.com/repos/{target_repo}/git/refs/heads/{default_branch}"
             ref_res = requests.get(ref_url, headers=headers)
             if ref_res.status_code != 200:
-                return {"success": False, "error": f"Could not find branch: {ref_res.json().get('message')}"}
+                err_msg = ref_res.json().get('message', 'Unknown error')
+                return {"success": False, "error": f"Could not find branch: {err_msg}"}
             
             latest_sha = ref_res.json()['object']['sha']
 
@@ -101,7 +106,7 @@ class GitHubService:
             file_url = f"https://api.github.com/repos/{target_repo}/contents/{target_file_path}?ref={default_branch}"
             file_res = requests.get(file_url, headers=headers)
             if file_res.status_code != 200:
-                return {"success": False, "error": f"Could not find {target_file_path} in the repository."}
+                return {"success": False, "error": f"Could not find {target_file_path} in the repository. Please verify the file path."}
 
             file_data = file_res.json()
             file_sha = file_data['sha']
@@ -109,15 +114,16 @@ class GitHubService:
 
             # 4. Generate AI fix OR Use string replacement
             if current_code and suggested_code:
+                print("DEBUG [GitHubService]: Performing direct string replacement.")
                 if current_code not in raw_source_code:
                     return {"success": False, "error": "The specified code snippet was not found in the target file. The file may have been updated."}
                 fixed_code = raw_source_code.replace(current_code, suggested_code, 1)
             else:
-                # Fallback to AI rewrite if string replacement is not provided (Legacy)
+                print("DEBUG [GitHubService]: No direct codes provided, triggering AI fix generation.")
                 fixed_code = GitHubService._generate_ai_fix(fix_title, fix_explanation, target_file_path, raw_source_code)
                 
             if not fixed_code:
-                 return {"success": False, "error": "Failed to generate or apply the fix."}
+                 return {"success": False, "error": "The AI failed to generate a valid fix for this code. Please try again or provide manual snippets."}
 
             # 5. Create new branch
             random_id = uuid.uuid4().hex[:6]
@@ -161,16 +167,17 @@ class GitHubService:
             return {"success": False, "error": f"Failed to open PR: {pr_res.json().get('message')}"}
 
         except Exception as e:
-            print(f"GitHub service error: {e}")
+            print(f"CRITICAL ERROR [GitHubService]: {e}")
             return {"success": False, "error": str(e)}
 
     @staticmethod
     def _generate_ai_fix(title: str, explanation: str, file_path: str, source_code: str) -> Optional[str]:
         # Legacy fallback
         import google.generativeai as genai
+        import re
         try:
             genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
-            model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             prompt = f"""
             You are an expert Next.js/React developer.
@@ -179,7 +186,7 @@ class GitHubService:
             Details: {explanation}
 
             Here is the EXACT source code of `{file_path}`:
-            ```
+            ```tsx
             {source_code}
             ```
 
@@ -190,9 +197,19 @@ class GitHubService:
             response = model.generate_content(prompt)
             fixed_code = response.text.strip()
             
-            if fixed_code.startswith("```"):
+            # Robust extraction: find code within markdown blocks if present
+            code_block_match = re.search(r'```(?:\w+)?\n?(.*?)```', fixed_code, re.DOTALL)
+            if code_block_match:
+                fixed_code = code_block_match.group(1).strip()
+            elif fixed_code.startswith("```"):
+                # Fallback for broken blocks
                 fixed_code = "\n".join(fixed_code.split("\n")[1:-1])
             
+            if not fixed_code:
+                print("ERROR [_generate_ai_fix]: AI returned empty code.")
+                return None
+
+            print(f"DEBUG [_generate_ai_fix]: Successfully generated {len(fixed_code)} bytes of fixed code.")
             return fixed_code
         except Exception as e:
             print(f"AI fix generation error: {e}")
