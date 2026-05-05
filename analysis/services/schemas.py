@@ -50,6 +50,8 @@ class EnrichedStatistics(BaseModel):
 class DashboardIntelligencePayload(BaseModel):
     global_health_score: int = Field(..., description="0-100 consolidated grade")
     technical_health: int = Field(default=85, description="Technical health score from PageSpeed")
+    content_score: int = Field(default=70, description="Neural analysis of content quality")
+    backlink_strength: int = Field(default=40, description="Graph-based evaluation of backlink profile")
     traffic_velocity: str = Field(..., description="'trending_up', 'trending_down', 'flat'")
     enriched_statistics: EnrichedStatistics
     critical_action_items: List[ActionItem]

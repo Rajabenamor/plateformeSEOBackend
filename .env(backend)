@@ -1,0 +1,42 @@
+# .env file
+EMAIL_HOST_USER =a452c8001@smtp-brevo.com
+EMAIL_HOST_PASSWORD =xsmtpsib-ebd579289d4ef7a4f0e9d116b7a332376eba65d60a13a1204db9e973f7e6fd69-LtaIyNrki1bS6YmI  
+DEFAULT_FROM_EMAIL =strive.company.support@gmail.com
+SECRET_KEY =django-insecure-%%xjmb+d^e1&s!)!(m6wb-65^!1=y_!=buhjkf*4#1!s8)5e!q
+DB_NAME=seo_dashboard_db
+DB_USER=seo_user
+DB_PASSWORD =seouser123
+
+
+#sign in with google
+#client_id 
+GOOGLE_CLIENT_ID=134264669287-qr8f416jdiooud2c4o6ej1asbo1l6g52.apps.googleusercontent.com
+#client_secret
+CLIENT_SECRET=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
+#for ga4 
+GOOGLE_APPLICATION_CREDENTIALS="ga-reporting-488409-d2b1b9b1c543.json"
+
+#GA4 property ID
+GA4_PROPERTY_ID="525010063"
+
+#for the ai agent
+GEMINI_API_KEY="AIzaSyCRBpWNYokZqPKhqTlwucikkG21jvub_nI"
+
+#pagespeed key
+PAGESPEED_API_KEY="AIzaSyB9Ia6_bzxRK7I_kt2keSysXC4uTfb3-cE"
+
+#zyte key
+ZYTE_API_KEY="cfe16c1d92f34e8ea30cbd18af5dd582"
+#pagerank key
+OPEN_PAGERANK_API_KEY="gs480sc4ooksc40gwgkokw8ksgsks04wso84ss4o"
+
+#github_app
+GITHUB_CLIENT_SECRET=eaa142fc4a6b68ee43da871ad74284ca8c16a7f0
+
+#upstach url 
+
+CELERY_BROKER_URL=rediss://default:gQAAAAAAAVo4AAIncDFhMGRiNDNkYWMwY2I0M2QxYjZkOTE5M2Y2YWZlNjczYXAxODg2MzI@divine-hagfish-88632.upstash.io:6379
+
+#github client
+GITHUB_CLIENT_ID=Iv23liwkiaXxzfcdJk0m
+GITHUB_CLIENT_SECRET=089f21c7aafe77ac5b837b0926c5804fdf2bf2d0
