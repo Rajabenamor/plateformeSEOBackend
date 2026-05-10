@@ -74,9 +74,12 @@ class GitHubService:
         fix_explanation: str,
         target_file_path: str,
         current_code: str = None,
-        suggested_code: str = None
+        suggested_code: str = None,
+        code_fix: str = None
     ) -> Dict[str, Any]:
         try:
+            # Use code_fix if suggested_code is not provided
+            suggested_code = suggested_code or code_fix
             headers = {
                 "Authorization": f"token {github_token}",
                 "Accept": "application/vnd.github.v3+json"
@@ -120,7 +123,9 @@ class GitHubService:
                 fixed_code = raw_source_code.replace(current_code, suggested_code, 1)
             else:
                 print("DEBUG [GitHubService]: No direct codes provided, triggering AI fix generation.")
-                fixed_code = GitHubService._generate_ai_fix(fix_title, fix_explanation, target_file_path, raw_source_code)
+                fixed_code, ai_error = GitHubService._generate_ai_fix(fix_title, fix_explanation, target_file_path, raw_source_code, suggested_code)
+                if ai_error:
+                    return {"success": False, "error": ai_error}
                 
             if not fixed_code:
                  return {"success": False, "error": "The AI failed to generate a valid fix for this code. Please try again or provide manual snippets."}
@@ -171,19 +176,32 @@ class GitHubService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    def _generate_ai_fix(title: str, explanation: str, file_path: str, source_code: str) -> Optional[str]:
+    def _generate_ai_fix(title: str, explanation: str, file_path: str, source_code: str, suggested_code: str = None) -> Tuple[Optional[str], Optional[str]]:
         # Legacy fallback
         import google.generativeai as genai
+        from google.generativeai.types import HarmCategory, HarmBlockThreshold
         import re
+        from django.conf import settings
+
         try:
-            genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            api_key = os.environ.get('GEMINI_API_KEY') or getattr(settings, 'GEMINI_API_KEY', None)
+            if not api_key:
+                print("ERROR [_generate_ai_fix]: GEMINI_API_KEY is missing!")
+                return None, "System configuration error: Missing AI API key."
+
+            # Strip whitespace to prevent 400 errors from trailing spaces
+            genai.configure(api_key=api_key.strip())
             
+            # Use specific model name
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            snippet_context = f"\n\nHere is a suggested code snippet to help you fix it:\n```tsx\n{suggested_code}\n```" if suggested_code else ""
+
             prompt = f"""
             You are an expert Next.js/React developer.
             I need to fix the following SEO issue in the code:
             Issue: {title}
-            Details: {explanation}
+            Details: {explanation}{snippet_context}
 
             Here is the EXACT source code of `{file_path}`:
             ```tsx
@@ -194,8 +212,26 @@ class GitHubService:
             CRITICAL: Return ONLY the raw, updated code. Do NOT include markdown blocks. Do NOT include text explanations.
             """
             
-            response = model.generate_content(prompt)
+            print(f"DEBUG [_generate_ai_fix]: Requesting fix from Gemini for {file_path}...")
+            
+            # BLOCK_ONLY_HIGH is safer for 400 errors than BLOCK_NONE on free tier keys
+            safety_settings = {
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+            }
+
+            response = model.generate_content(prompt, safety_settings=safety_settings)
+            
+            # Check if response was blocked
+            if not response.candidates or response.candidates[0].finish_reason != 1:
+                 reason = response.candidates[0].finish_reason if response.candidates else "Unknown"
+                 print(f"ERROR [_generate_ai_fix]: AI Generation blocked. Reason: {reason}")
+                 return None, f"AI generation blocked (Code: {reason}). Try a different recommendation."
+
             fixed_code = response.text.strip()
+            print(f"DEBUG [_generate_ai_fix]: Raw AI response received ({len(fixed_code)} bytes).")
             
             # Robust extraction: find code within markdown blocks if present
             code_block_match = re.search(r'```(?:\w+)?\n?(.*?)```', fixed_code, re.DOTALL)
@@ -205,12 +241,36 @@ class GitHubService:
                 # Fallback for broken blocks
                 fixed_code = "\n".join(fixed_code.split("\n")[1:-1])
             
-            if not fixed_code:
-                print("ERROR [_generate_ai_fix]: AI returned empty code.")
-                return None
+            # Final sanity check
+            if len(fixed_code) < 10:
+                print(f"ERROR [_generate_ai_fix]: Extracted code is too short.")
+                return None, "AI Generation Error: The generated code was invalid or incomplete."
 
-            print(f"DEBUG [_generate_ai_fix]: Successfully generated {len(fixed_code)} bytes of fixed code.")
-            return fixed_code
+            return fixed_code, None
         except Exception as e:
             print(f"AI fix generation error: {e}")
-            return None
+            # If 400 persists, it might be the safety_settings themselves. Try one last time without them.
+            if "400" in str(e):
+                 return GitHubService._generate_ai_fix_no_safety(title, explanation, file_path, source_code)
+            return None, f"AI Exception: {str(e)}"
+
+    @staticmethod
+    def _generate_ai_fix_no_safety(title: str, explanation: str, file_path: str, source_code: str, suggested_code: str = None) -> Tuple[Optional[str], Optional[str]]:
+        """Last resort retry without custom safety settings to avoid 400 errors."""
+        import google.generativeai as genai
+        import re
+        from django.conf import settings
+        try:
+            api_key = (os.environ.get('GEMINI_API_KEY') or getattr(settings, 'GEMINI_API_KEY', None)).strip()
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            snippet_context = f"\n\nHere is a suggested code snippet to help you fix it:\n```tsx\n{suggested_code}\n```" if suggested_code else ""
+            prompt = f"Fix SEO issue '{title}' ({explanation}){snippet_context} in this file:\n{source_code}\n\nReturn ONLY the fixed code."
+            response = model.generate_content(prompt)
+            if not response.text: return None, "AI blocked."
+            fixed_code = response.text.strip()
+            code_block_match = re.search(r'```(?:\w+)?\n?(.*?)```', fixed_code, re.DOTALL)
+            if code_block_match: fixed_code = code_block_match.group(1).strip()
+            return fixed_code, None
+        except Exception as e:
+            return None, f"AI Retry Exception: {str(e)}"

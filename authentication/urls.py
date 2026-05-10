@@ -19,6 +19,8 @@ urlpatterns = [
     path('integrations/github/exchange/', integration_views.GithubExchangeView.as_view(), name='github-exchange'),
     path('integrations/github/create-pr/', integration_views.CreateGithubPRView.as_view(), name='github-create-pr'),
     path('integrations/github/save-repo/', integration_views.SaveGithubRepoView.as_view(), name='save-github-repo'),
+    path('integrations/google/exchange/', integration_views.GA4ExchangeView.as_view(), name='google-exchange'),
+    path('integrations/google/save-property/', integration_views.SaveGA4PropertyView.as_view(), name='save-ga4-property'),
 
     # Dashboard
     path('api/dashboard/', dashboard_views.dashboard_api, name='dashboard_api'),

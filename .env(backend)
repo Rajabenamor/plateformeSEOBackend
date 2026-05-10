@@ -20,15 +20,15 @@ GOOGLE_APPLICATION_CREDENTIALS="ga-reporting-488409-d2b1b9b1c543.json"
 GA4_PROPERTY_ID="525010063"
 
 #for the ai agent
-GEMINI_API_KEY="AIzaSyCRBpWNYokZqPKhqTlwucikkG21jvub_nI"
+GEMINI_API_KEY=AIzaSyCRBpWNYokZqPKhqTlwucikkG21jvub_nI
 
 #pagespeed key
-PAGESPEED_API_KEY="AIzaSyB9Ia6_bzxRK7I_kt2keSysXC4uTfb3-cE"
+PAGESPEED_API_KEY=AIzaSyB9Ia6_bzxRK7I_kt2keSysXC4uTfb3-cE
 
 #zyte key
-ZYTE_API_KEY="cfe16c1d92f34e8ea30cbd18af5dd582"
+ZYTE_API_KEY=cfe16c1d92f34e8ea30cbd18af5dd582
 #pagerank key
-OPEN_PAGERANK_API_KEY="gs480sc4ooksc40gwgkokw8ksgsks04wso84ss4o"
+OPEN_PAGERANK_API_KEY=gs480sc4ooksc40gwgkokw8ksgsks04wso84ss4o
 
 #github_app
 GITHUB_CLIENT_SECRET=eaa142fc4a6b68ee43da871ad74284ca8c16a7f0

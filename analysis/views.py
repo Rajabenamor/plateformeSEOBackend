@@ -64,7 +64,7 @@ class DashboardDataView(APIView):
         if not url:
             return Response({"error": "URL parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
             
-        aggregator = DashboardAggregatorService()
+        aggregator = DashboardAggregatorService(user=request.user)
         try:
             payload = aggregator.build_payload(url)
             return Response(payload, status=status.HTTP_200_OK)

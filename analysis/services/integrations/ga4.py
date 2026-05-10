@@ -8,24 +8,31 @@ from google.analytics.data_v1beta.types import (
     RunReportRequest,
 )
 
+from google.oauth2.credentials import Credentials
+
 class GA4Service:
     """
     Service to interact with the Google Analytics 4 API.
     Uses the credentials file specified in GOOGLE_APPLICATION_CREDENTIALS.
     """
     
-    def __init__(self):
-        # We assume the environment variable GOOGLE_APPLICATION_CREDENTIALS 
-        # is already loaded by django-environ or similar in settings.py
-        self.property_id = os.environ.get("GA4_PROPERTY_ID")
+    def __init__(self, property_id=None, access_token=None):
+        self.property_id = property_id or os.environ.get("GA4_PROPERTY_ID")
+        self.access_token = access_token
         
         if not self.property_id:
             print("WARNING: GA4_PROPERTY_ID is not set. Real GA4 data will fail.")
+            self.client = None
+            return
             
         try:
-            self.client = BetaAnalyticsDataClient()
+            if self.access_token:
+                credentials = Credentials(token=self.access_token)
+                self.client = BetaAnalyticsDataClient(credentials=credentials)
+            else:
+                self.client = BetaAnalyticsDataClient()
         except Exception as e:
-            print(f"Failed to initialize GA4 Client. Ensure credentials JSON is valid. Error: {e}")
+            print(f"Failed to initialize GA4 Client. Error: {e}")
             self.client = None
 
     def get_traffic_last_30_days(self) -> list[dict]:
