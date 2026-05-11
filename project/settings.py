@@ -170,6 +170,8 @@ GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID')
 GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
 CELERY_BROKER_URL= os.getenv("CELERY_BROKER_URL")
 CELERY_BROKER_USE_SSL = {
     'ssl_cert_reqs': None
