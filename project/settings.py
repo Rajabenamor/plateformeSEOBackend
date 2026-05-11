@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'django_extensions',
     'analysis',
+    'drf_yasg',
 ]
 
 DJANGO_REST_PASSWORDRESET_TOKEN_CONFIG ={

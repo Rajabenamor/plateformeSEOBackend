@@ -4,6 +4,7 @@ import uuid
 import base64
 import os
 import google.generativeai as genai
+from .services.github_service import GitHubService
 from rest_framework.permissions import AllowAny
 from django.contrib.auth.models import User
 from .serializers import RegisterSerializer , UserSerializer , ChangePasswordSerializer
@@ -253,7 +254,7 @@ class CreateGithubPRView(APIView):
             if not github_token or not target_repo:
                 return Response({"error": "GitHub not connected or repo not selected."}, status=status.HTTP_403_FORBIDDEN)
 
-            from .services.github_service import GitHubService
+            
             result = GitHubService.create_pull_request(
                 github_token=github_token,
                 target_repo=target_repo,
@@ -263,7 +264,6 @@ class CreateGithubPRView(APIView):
                 current_code=current_code,
                 suggested_code=suggested_code
             )
-
             if result.get("success"):
                 return Response({"message": "Success!", "pr_url": result.get("pr_url")}, status=status.HTTP_201_CREATED)
             else:
