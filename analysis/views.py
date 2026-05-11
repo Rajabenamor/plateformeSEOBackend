@@ -53,6 +53,8 @@ class AnalysisHistoryDetailView(generics.RetrieveAPIView):
     def get_queryset(self):
         return AnalysisHistory.objects.filter(user=self.request.user)
 
+from urllib.parse import urlparse
+
 class DashboardDataView(APIView):
     """
     Returns the aggregated intelligence payload for the dashboard and saves it to history.
@@ -63,6 +65,24 @@ class DashboardDataView(APIView):
         url = request.query_params.get('url')
         if not url:
             return Response({"error": "URL parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # --- DOMAIN OWNERSHIP VERIFICATION ---
+        # Lock the user to the first domain they ever analyzed to prevent cross-data bleed
+        first_history = AnalysisHistory.objects.filter(user=request.user).order_by('created_at').first()
+        if first_history:
+            first_domain = urlparse(first_history.url_analyzed).netloc.replace('www.', '')
+            
+            check_url = url
+            if not check_url.startswith(('http://', 'https://')):
+                check_url = f"https://{check_url}"
+                
+            requested_domain = urlparse(check_url).netloc.replace('www.', '')
+            
+            if first_domain and requested_domain and first_domain != requested_domain:
+                return Response({
+                    "error": f"Security Violation: You are only authorized to analyze your registered domain ({first_domain}). Analyzing external domains like {requested_domain} is blocked."
+                }, status=status.HTTP_403_FORBIDDEN)
+        # -------------------------------------
             
         aggregator = DashboardAggregatorService(user=request.user)
         try:
