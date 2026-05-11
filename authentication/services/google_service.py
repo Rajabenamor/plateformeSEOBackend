@@ -5,8 +5,31 @@ from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta import DateRange, Dimension, Metric, RunReportRequest
 from google.oauth2.credentials import Credentials
 from typing import Dict, Any, List, Optional
+import requests
+import os
 
 class GoogleService:
+    @staticmethod
+    def exchange_auth_code(code: str) -> Optional[Dict[str, Any]]:
+        try:
+            response = requests.post(
+                'https://oauth2.googleapis.com/token',
+                data={
+                    'code': code,
+                    'client_id': settings.GOOGLE_CLIENT_ID,
+                    'client_secret': os.getenv('CLIENT_SECRET'),
+                    'redirect_uri': f"{settings.FRONTEND_URL}/auth/callback/google",
+                    'grant_type': 'authorization_code',
+                }
+            )
+            data = response.json()
+            if 'error' in data:
+                print(f"Google token exchange failed: {data}")
+            return data
+        except Exception as e:
+            print(f"Google token exchange error: {e}")
+            return None
+
     @staticmethod
     def verify_token(credential: str) -> Optional[Dict[str, Any]]:
         try:

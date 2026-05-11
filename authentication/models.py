@@ -18,6 +18,7 @@ class UserIntegration(models.Model):
     
     ga4_access_token = models.CharField(max_length=255, blank=True, null=True)
     ga4_refresh_token = models.CharField(max_length=255, blank=True, null=True)
+    ga4_token_expiry = models.DateTimeField(blank=True, null=True)
     ga4_property_id = models.CharField(max_length=255, blank=True, null=True)
     
     created_at = models.DateTimeField(auto_now_add=True)

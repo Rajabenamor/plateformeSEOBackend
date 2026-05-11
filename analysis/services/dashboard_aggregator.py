@@ -13,9 +13,19 @@ _ANALYSIS_CACHE = {}
 _CACHE_TTL = 300  # 5 minutes
 
 class DashboardAggregatorService:
-    def __init__(self):
+    def __init__(self, user=None):
         # Initialize API clients
-        self.ga4_service = GA4Service()
+        property_id = None
+        access_token = None
+        if user:
+            try:
+                integration = user.integrations
+                property_id = integration.ga4_property_id
+                access_token = integration.ga4_access_token
+            except Exception:
+                pass
+                
+        self.ga4_service = GA4Service(property_id=property_id, access_token=access_token)
         self.pagespeed_service = PageSpeedService()
         self.gemini_service = GeminiService()
         self.scraper_service = ScraperService()
@@ -46,12 +56,12 @@ class DashboardAggregatorService:
             f_opr = executor.submit(self.scraper_service.fetch_backlink_strength, target_url)
 
             real_traffic_data = safe_result(f_ga4, 10, [])
-            pagespeed_data = safe_result(f_ps, 10, self.pagespeed_service._get_fallback_data())
+            pagespeed_data = safe_result(f_ps, 10, {})
             raw_html = safe_result(f_zyte, 10, "")
-            backlink_strength = safe_result(f_opr, 10, 45)
+            backlink_strength = safe_result(f_opr, 10, 0)
 
         # 2. Generate Intelligence & Recommendations
-        intelligence_default = {"global_health_score": 68, "traffic_velocity": "flat", "traffic_decay": [], "cannibalization": [], "missed_clicks": [], "competitor_blind_spots": []}
+        intelligence_default = {"global_health_score": 0, "traffic_velocity": "flat", "traffic_decay": [], "cannibalization": [], "missed_clicks": [], "competitor_blind_spots": []}
         
         with ThreadPoolExecutor(max_workers=3) as executor:
             f_int = executor.submit(AIAnalyzerService.analyze_intelligence, real_traffic_data, pagespeed_data)
@@ -60,38 +70,24 @@ class DashboardAggregatorService:
 
             intelligence = safe_result(f_int, 10, intelligence_default)
             dynamic_action_items = safe_result(f_gem, 10, [])
-            content_analysis = safe_result(f_seo, 10, {"content_score": 72})
+            content_analysis = safe_result(f_seo, 10, {"content_score": 0})
 
         # 3. Final Payload Construction
         final_payload = {
-            "global_health_score": int(max(intelligence.get("global_health_score", 68), 55)),
-            "technical_health": int(max(pagespeed_data.get("technical_health", 75), 60)),
-            "content_score": int(max(content_analysis.get("content_score", 72), 65)),
-            "backlink_strength": int(max(backlink_strength, 45)),
-            "traffic_velocity": intelligence.get("traffic_velocity", "trending_up"),
-            "traffic": real_traffic_data if real_traffic_data else [
-                {"date": "20240401", "users": 420, "displayDate": "Apr 01"},
-                {"date": "20240415", "users": 650, "displayDate": "Apr 15"},
-                {"date": "20240501", "users": 890, "displayDate": "May 01"}
-            ],
+            "global_health_score": intelligence.get("global_health_score", 0),
+            "technical_health": pagespeed_data.get("technical_health", 0) if pagespeed_data else 0,
+            "content_score": content_analysis.get("content_score", 0) if content_analysis else 0,
+            "backlink_strength": backlink_strength if backlink_strength else 0,
+            "traffic_velocity": intelligence.get("traffic_velocity", "flat"),
+            "traffic": real_traffic_data if real_traffic_data else [],
             "enriched_statistics": {
-                "traffic_decay": intelligence.get("traffic_decay") or [
-                    {"url": target_url + "/blog/old-post", "drop_percentage": 24.5, "recommended_action": "Refresh content with 2024 insights"}
-                ],
-                "cannibalization": intelligence.get("cannibalization") or [
-                    {"keyword": "seo services", "competing_urls": [target_url + "/services", target_url + "/agency"], "recommended_action": "Merge pages or unique intent"}
-                ],
-                "missed_clicks": intelligence.get("missed_clicks") or [
-                    {"keyword": "ai seo", "url": target_url, "current_position": 4.2, "current_ctr": 2.1, "potential_traffic_gain": 1250}
-                ],
-                "mobile_penalty": pagespeed_data.get("mobile_penalty", {
-                    "desktop_score": 75, "mobile_score": 65, "penalty_gap": 10, "critical_issues": ["LCP is slow", "Render-blocking resources"]
-                }),
-                "competitor_blind_spots": intelligence.get("competitor_blind_spots") or [
-                    {"target_keyword": "enterprise seo", "missing_topics": ["Automation", "Data Science", "API Integration"], "competitor_urls": ["competitor.com"]}
-                ]
+                "traffic_decay": intelligence.get("traffic_decay", []),
+                "cannibalization": intelligence.get("cannibalization", []),
+                "missed_clicks": intelligence.get("missed_clicks", []),
+                "mobile_penalty": pagespeed_data.get("mobile_penalty", {}) if pagespeed_data else {},
+                "competitor_blind_spots": intelligence.get("competitor_blind_spots", [])
             },
-            "critical_action_items": dynamic_action_items if (dynamic_action_items and len(dynamic_action_items) > 0) else self.gemini_service._get_mock_items(target_url),
+            "critical_action_items": dynamic_action_items if dynamic_action_items else [],
             "analyzed_url": target_url
         }
 

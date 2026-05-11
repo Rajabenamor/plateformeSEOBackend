@@ -17,7 +17,7 @@ from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-load_dotenv()
+load_dotenv(override=True)
 
 SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = True
@@ -168,6 +168,7 @@ LOGGING = {
 
 GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID')
 GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 CELERY_BROKER_URL= os.getenv("CELERY_BROKER_URL")
 CELERY_BROKER_USE_SSL = {
