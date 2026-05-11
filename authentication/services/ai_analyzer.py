@@ -122,8 +122,8 @@ class AIAnalyzerService:
             CRITICAL RULES FOR CODE EXECUTION:
             1. SURGICAL PRECISION: Do not rewrite entire files. Identify the absolute minimum snippet of code (`current_code`) required to apply the fix.
             2. EXACT MATCHING: The `current_code` MUST perfectly match the provided source code, preserving exact indentation, line breaks, and whitespace. We will use `str.replace(current_code, suggested_code)` programmatically. If it doesn't match exactly, the system will crash.
-            3. SAFE CHANGES ONLY: Limit suggestions to Meta tags, Semantic HTML (H1-H6 structure), Image attributes (alt/width/height), and Structured Data (JSON-LD). 
-            4. DO NOT BREAK UI: Do not alter Tailwind classes, CSS layouts, or React hooks/state logic.
+            3. COMPREHENSIVE ANALYSIS: Suggest fixes for ANY type of issue found (Performance, SEO, Accessibility, Best Practices, Security, etc.). Do not limit yourself to just SEO meta tags.
+            4. DO NOT BREAK UI: Be careful not to alter Tailwind classes, CSS layouts, or React hooks/state logic unless they are the direct cause of a severe performance/accessibility issue.
             5. DETERMINISTIC JSON: You must respond ONLY with a JSON object matching the provided schema.
 
             THINKING PROCESS:
