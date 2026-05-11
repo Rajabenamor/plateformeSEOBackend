@@ -55,7 +55,7 @@ class AnalysisHistoryDetailView(generics.RetrieveAPIView):
 
 class DashboardDataView(APIView):
     """
-    Returns the aggregated intelligence payload for the dashboard.
+    Returns the aggregated intelligence payload for the dashboard and saves it to history.
     """
     permission_classes = [IsAuthenticated]
 
@@ -67,6 +67,33 @@ class DashboardDataView(APIView):
         aggregator = DashboardAggregatorService(user=request.user)
         try:
             payload = aggregator.build_payload(url)
+            
+            # Save or Update History
+            # We use update_or_create to keep history clean if they analyze the same site multiple times in one session
+            # Or we can create a new one every time if preferred. 
+            # Given the user wants "history", maybe a new one if it's been a while?
+            # For now, let's create a NEW entry each time to reflect a true history trail.
+            
+            critical_fixes = [item.get('title') for item in payload.get('critical_action_items', [])]
+            suggestions = []
+            if payload.get('enriched_statistics'):
+                stats = payload['enriched_statistics']
+                if stats.get('traffic_decay'):
+                    suggestions.append(f"Traffic decay detected on {len(stats['traffic_decay'])} URLs.")
+                if stats.get('mobile_penalty', {}).get('penalty_gap', 0) > 10:
+                    suggestions.append("High mobile performance penalty detected.")
+
+            AnalysisHistory.objects.create(
+                user=request.user,
+                url_analyzed=url,
+                status=AnalysisHistory.StatusChoices.COMPLETED,
+                seo_score=payload.get('overall_score'),
+                recommendations_summary={
+                    "critical_fixes": critical_fixes,
+                    "suggestions": suggestions
+                }
+            )
+
             return Response(payload, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
