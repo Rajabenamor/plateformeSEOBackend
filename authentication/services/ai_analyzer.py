@@ -52,7 +52,7 @@ class AIAnalyzerService:
         try:
             genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
             # Switching to flash for better availability and speed
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            model = genai.GenerativeModel('gemini-3-flash-preview')
 
             prompt = f"""
             You are a Neural SEO Intelligence Engine. Your task is to analyze RAW DATA and generate REAL insights. 
@@ -97,7 +97,7 @@ class AIAnalyzerService:
         try:
             genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
             # Switching to flash for better availability and speed
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            model = genai.GenerativeModel('gemini-3-flash-preview')
 
             ignored_context = ""
             if ignored_issues:

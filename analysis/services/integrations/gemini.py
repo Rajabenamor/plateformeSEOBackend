@@ -53,11 +53,62 @@ class GeminiService:
             print("WARNING: GEMINI_API_KEY is not set. Falling back to mock recommendations.")
         else:
             genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-pro') # Upgraded to Pro for deeper reasoning
+            self.model = genai.GenerativeModel('gemini-3.1-flash-lite') 
 
+    # def generate_action_items(self, target_url: str, pagespeed_data: dict, raw_html: str = None) -> list[dict]:
+    #     """
+    #     Uses Gemini to generate dynamic action items based on the provided URL, performance data, and HTML structure.
+    #     """
+    #     if not self.api_key:
+    #         return self._get_mock_items(target_url)
+
+    #     try:
+    #         # Construct the user prompt with the real data
+    #         user_prompt = f"""
+    #         Analyze the following URL, performance data, and HTML structure to generate 2 highly specific, safe code-fix recommendations.
+
+    #         Target URL: {target_url}
+
+    #         Performance Data context:
+    #         {json.dumps(pagespeed_data, indent=2)}
+
+    #         HTML Structure (Trimmmed for context):
+    #         {raw_html[:10000] if raw_html else "No HTML data available"}
+
+    #         Generate 2 JSON action items strictly adhering to the SYSTEM PROMPT rules. Do not include markdown blocks like ```json in the output. Return only the raw JSON string.
+    #         """
+
+    #         response = self.model.generate_content(
+    #             contents=[
+    #                 {"role": "user", "parts": [{"text": self.SYSTEM_PROMPT + "\n\n" + user_prompt}]}
+    #             ]
+    #         )
+
+    #         response_text = response.text.strip()
+            
+    #         # Clean up potential markdown formatting if Gemini included it despite instructions
+    #         if response_text.startswith("```json"):
+    #             response_text = response_text[7:]
+    #         if response_text.endswith("```"):
+    #             response_text = response_text[:-3]
+
+    #         data = json.loads(response_text)
+            
+    #         # Ensure STABLE IDs based on content
+    #         for item in data.get('action_items', []):
+    #             # Create a stable hash from title and target_file
+    #             seed = f"{item.get('title', '')}{item.get('target_file', '')}".encode('utf-8')
+    #             item['id'] = hashlib.md5(seed).hexdigest()
+    #             item['status'] = "pending"
+
+    #         return data.get('action_items', self._get_mock_items(target_url))
+
+    #     except Exception as e:
+    #         print(f"Error generating action items with Gemini: {e}")
+    #         return self._get_mock_items(target_url)
     def generate_action_items(self, target_url: str, pagespeed_data: dict, raw_html: str = None) -> list[dict]:
         """
-        Uses Gemini to generate dynamic action items based on the provided URL, performance data, and HTML structure.
+        Uses Gemini to generate exhaustive dynamic action items based on the provided URL, performance data, and HTML structure.
         """
         if not self.api_key:
             return self._get_mock_items(target_url)
@@ -65,34 +116,31 @@ class GeminiService:
         try:
             # Construct the user prompt with the real data
             user_prompt = f"""
-            Analyze the following URL, performance data, and HTML structure to generate 2 highly specific, safe code-fix recommendations.
+            Analyze the following URL, performance data, and HTML structure to generate an EXHAUSTIVE list of highly specific, safe code-fix recommendations. Do NOT stop at 2 items; identify every actionable issue.
 
             Target URL: {target_url}
 
             Performance Data context:
             {json.dumps(pagespeed_data, indent=2)}
 
-            HTML Structure (Trimmmed for context):
+            HTML Structure (Trimmed for context):
             {raw_html[:10000] if raw_html else "No HTML data available"}
 
-            Generate 2 JSON action items strictly adhering to the SYSTEM PROMPT rules. Do not include markdown blocks like ```json in the output. Return only the raw JSON string.
+            CRITICAL: For every single action item, you MUST provide 'current_code' (the exact existing snippet) and 'suggested_code' (the exact replacement). 
             """
 
+            # Force native JSON mode to eliminate markdown backticks
             response = self.model.generate_content(
                 contents=[
                     {"role": "user", "parts": [{"text": self.SYSTEM_PROMPT + "\n\n" + user_prompt}]}
-                ]
+                ],
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json"
+                )
             )
 
-            response_text = response.text.strip()
-            
-            # Clean up potential markdown formatting if Gemini included it despite instructions
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-
-            data = json.loads(response_text)
+            # We can load directly because response_mime_type guarantees clean JSON
+            data = json.loads(response.text)
             
             # Ensure STABLE IDs based on content
             for item in data.get('action_items', []):
