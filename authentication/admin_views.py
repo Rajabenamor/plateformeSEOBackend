@@ -5,25 +5,25 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.exceptions import ValidationError, PermissionDenied # FIXED: Added missing imports
 from .serializers import UserSerializer , UserUpdateSerializer
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-
 class UserListView(generics.ListAPIView):
-    permission_classes= [IsAdminUser]
-    serializer_class= UserSerializer
-    queryset= User.objects.all().order_by('-date_joined')
-    pagination_class= PageNumberPagination
+    permission_classes = [IsAdminUser]
+    serializer_class = UserSerializer
+    queryset = User.objects.all().order_by('-date_joined')
+    pagination_class = PageNumberPagination
 
 class UserDeleteView(generics.DestroyAPIView):
-    permission_classes= [IsAdminUser]
-    serializer_class= UserSerializer
-    queryset= User.objects.all()
+    permission_classes = [IsAdminUser]
+    serializer_class = UserSerializer
+    queryset = User.objects.all()
     lookup_field = 'id'
-    lookup_url_kwarg='user_id'
+    lookup_url_kwarg = 'user_id'
 
     def perform_destroy(self, instance):
         if instance == self.request.user:
@@ -35,55 +35,71 @@ class UserDeleteView(generics.DestroyAPIView):
         instance.delete()
 
 
-class UsetToggleActiveView(APIView):
+class UserToggleActiveView(APIView):
     permission_classes = [IsAdminUser]
 
-    def patch(self,request,user_id):
+    def patch(self, request, user_id):
         try:
-            user= User.objects.get(id=user_id)
-        except User.doesNotExist:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist: # FIXED: Correct capitalization
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         
         if user == request.user:
              return Response({'error': 'You cannot deactivate your own account'}, status=status.HTTP_400_BAD_REQUEST)
+        
         new_status = request.data.get('is_active')
 
         if new_status is None:
             return Response({'error': "'is_active' field is required"}, status=status.HTTP_400_BAD_REQUEST)
-        user.is_active=new_status
+        
+        user.is_active = new_status
         user.save()
-        try :
-            if user.is_active:
-                 send_mail(
-                    subject='Your Account has been Activated!',
-                    message=f"Hi {user.username},\n\nYour account is now active. You can log in and start using the platform.\n\nBest regards,\nThe Admin Team",
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user.email],
-                    fail_silently=False
+        # --- BREVO TEMPLATE EMAIL HANDLING ---
+        if user.email:
+            try:
+                login_url = getattr(settings, 'FRONTEND_LOGIN_URL', 'http://localhost:3000/login')
+                
+                # Initialize the email message (Brevo template handles the subject and body)
+                message = EmailMessage(
+                    to=[user.email],
+                    from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@yourdomain.com')
                 )
-            else :
-                 send_mail(
-                    subject='Your Account has been Deactivated!',
-                    message=f"Hi {user.username},\n\nYour account has been  deacactivated by an administartor. If you believe this is a mistake, please contact support.",
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user.email],
-                    fail_silently=False
+                
+                # Pass dynamic variables to your Brevo template using {{ params.variable_name }}
+                message.merge_global_data = {
+                    'first_name': user.first_name or user.username,
+                    'username': user.username,
+                    'login_url': login_url
+                }
+
+                if user.is_active:
+                    #Activation Template ID from Brevo
+                    message.template_id = 3 
+                else:
+                    # Deactivation Template ID from Brevo
+                    message.template_id = 4 
+
+                message.send(fail_silently=False)
+                logger.info(f"Status update email (Template {message.template_id}) sent to {user.email}")
+                
+            except Exception as e:
+                logger.error(
+                    "Failed to send status update email to %s. Error: %s", 
+                    user.email, 
+                    str(e), 
+                    exc_info=True
                 )
+        else:
+            logger.warning("No email address found for user '%s'. Skipping email notification.", user.username)
 
-        except Exception as e:
-            print(f"Error sending status update email: {e}")
+        action = 'activated' if user.is_active else 'deactivated'
+        logger.info(f"Admin '{request.user.username}' {action} '{user.username}'")
 
-        return Response({'message': f"User {user.username} status updated to {user.is_active}.",
-        "is_active": user.is_active},
-         status=status.HTTP_200_OK)
+        return Response({
+            'message': f"User {user.username} status updated to {user.is_active}.",
+            "is_active": user.is_active
+        }, status=status.HTTP_200_OK)
 
-        action= 'activated ' if user.is_active else 'deactivated'
-        user.is_active = not user.is_active
-        user.save()
-
-        logger.info(f"Admin '{self.request.user.username}' {action } '{user.username}'")
-
-        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
 class CreateUserView(APIView):
     permission_classes = [IsAdminUser]
