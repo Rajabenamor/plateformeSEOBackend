@@ -33,28 +33,38 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """
+    Custom JSON Web Token (JWT) serializer for user login.
+    It adds specific user details to the token and blocks 
+    access if the user account is not active.
+    """
     @classmethod
     def get_token(cls, user):
+        """Creates the JWT token and adds the user's role to it."""
         token = super().get_token(user)
+        # Add user roles to the token Payload so the frontend knows their permissions(stateless frontend authorization)
         token['is_staff'] = user.is_staff
         token['is_superuser'] = user.is_superuser
         return token
     def validate(self, attrs):
+        """Checks user login details and blocks unauthorized attempts."""
         username= attrs.get(self.username_field)
         user = User.objects.filter(username=username).first()
+        # Security Check: Stop login if the account is not active yet
         if user and not user.is_active:
             raise serializers.ValidationError(
                 {'error':'Your account is pending admin approval.Please check your email.'}
             )
+        # Securely check the user's password
         data = super().validate(attrs)
+        # Add extra user details to the final API response
         data['is_staff'] = self.user.is_staff
         data['user'] = {
             'email': self.user.email,
             'username': f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username,
-            'plan': 'Free Plan'
         }
-        
         return data
+
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
