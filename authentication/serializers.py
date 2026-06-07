@@ -4,6 +4,9 @@ from django.contrib.auth.models import User
 from django.core.mail import send_mail
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
+import random
+from django.core.cache import cache
+
 class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -12,29 +15,13 @@ class RegisterSerializer(serializers.ModelSerializer):
             'password': {'write_only': True},
             'email': {'required': True}
         }
+
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("A user with that email already exists.")
         return value
 
-    def create(self, validated_data):
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password'],
-            is_active=False
-        )
-        try:
-            send_mail(
-                subject="Registration Received - Action Required",
-                message=f"Hi {user.username},\n\nThank you for registering! Your account has been created successfully.\nFor security reasons, an administrator must verify and activate your account before you can log in.\n\nYou will receive another email as soon as your account is active.",               
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False
-            )
-        except Exception as e :
-            print(f"Error sending registration email:{e}")
-        return user
+ 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
