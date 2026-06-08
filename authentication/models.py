@@ -15,6 +15,8 @@ User = get_user_model()
 class UserIntegration(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='integrations')
     
+    primary_domain = models.CharField(max_length=255, null=True, blank=True)
+    
     github_access_token = models.CharField(max_length=255, blank=True, null=True)
     github_repo_linked = models.CharField(max_length=255, blank=True, null=True)
     
@@ -33,3 +35,6 @@ class UserIntegration(models.Model):
     def create_user_integration(sender, instance, created, **kwargs):
         if created:
             UserIntegration.objects.create(user=instance)
+           
+    
+   
