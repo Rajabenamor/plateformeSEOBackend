@@ -72,9 +72,16 @@ class DashboardDataView(APIView):
         try:
             payload = aggregator.build_payload(url)
             
-            # --- THE FIX: Inject GitHub connection status into the dashboard data ---
+            # --- THE FIX: Inject GitHub AND GA4 connection status into the dashboard data ---
             has_integrations = hasattr(request.user, 'integrations')
-            payload['is_github_connected'] = bool(has_integrations and request.user.integrations.github_repo_linked)
+            if has_integrations:
+                integrations = request.user.integrations
+                payload['is_github_connected'] = bool(integrations.github_repo_linked)
+                # Add the missing GA4 boolean flag for the frontend UI:
+                payload['is_ga_connected'] = bool(integrations.ga4_property_id or integrations.ga4_access_token)
+            else:
+                payload['is_github_connected'] = False
+                payload['is_ga_connected'] = False
             # ------------------------------------------------------------------------
 
             critical_fixes = [item.get('title') for item in payload.get('critical_action_items', [])]
