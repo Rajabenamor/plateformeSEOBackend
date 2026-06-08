@@ -247,3 +247,21 @@ def verify_email_change(request):
         return Response({"success": False, "error": "Invalid or expired token."}, status=400)
     except User.DoesNotExist:
         return Response({"success": False, "error": "User not found."}, status=404)
+
+
+class DeleteAccountView(APIView):
+    """
+    Allows an authenticated user to permanently delete their own account.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        try:
+            user = request.user
+            user.delete() # Automatically cascades to delete their history/integrations
+            return Response({"message": "Account successfully deleted."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to delete account: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

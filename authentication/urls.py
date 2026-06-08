@@ -9,6 +9,7 @@ urlpatterns = [
     path('verify/', TokenVerifyView.as_view(), name='token_verify'),
     path('register/', auth_views.RegisterPendingView.as_view(), name='auth_register'),
     path('verify-otp/', auth_views.VerifyOTPView.as_view(), name='verify-otp'),
+    path('delete-account/', auth_views.DeleteAccountView.as_view(), name='delete-account'),
     path('google/', auth_views.GoogleAuthView.as_view(), name='google_auth' ),
     path('users/me/', auth_views.UserProfileView.as_view(), name='user-profile'),
     path('users/update-profile/', auth_views.update_profile, name='update_profile'),
@@ -22,7 +23,8 @@ urlpatterns = [
     path('integrations/github/save-repo/', integration_views.SaveGithubRepoView.as_view(), name='save-github-repo'),
     path('integrations/google/exchange/', integration_views.GA4ExchangeView.as_view(), name='google-exchange'),
     path('integrations/google/save-property/', integration_views.SaveGA4PropertyView.as_view(), name='save-ga4-property'),
-
+    path('integrations/disconnect/', integration_views.DisconnectIntegrationView.as_view(), name='disconnect-integration'),
+    path('integrations/reset-domain/', integration_views.ResetDomainLockView.as_view(), name='reset-domain-lock'),
     # Dashboard
     path('api/dashboard/', dashboard_views.dashboard_api, name='dashboard_api'),
 ]

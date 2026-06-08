@@ -1,60 +1,56 @@
 from django.shortcuts import render
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from .serializers import AnalysisHistorySerializer
-from .models import AnalysisHistory, IgnoredRecommendation
 from rest_framework import generics
-from .services.dashboard_aggregator import DashboardAggregatorService
-
-
-class AnalyzeURLView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = AnalysisHistorySerializer(data=request.data)
-
-        if serializer.is_valid():
-            analysis_record = serializer.save(user=request.user)
-
-            # Assuming run_seo_analysis is imported elsewhere or handled by celery
-            # run_seo_analysis.delay(analysis_record.id)
-
-            return Response(
-                {
-                    "message": "Analysis started.",
-                    "data": serializer.data
-                },
-                status=status.HTTP_202_ACCEPTED
-            )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class AnalysisHistoryListView(generics.ListAPIView):
-    """
-    Returns a list of all SEO analyses for the logged-in user.
-    """
-    serializer_class = AnalysisHistorySerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        return AnalysisHistory.objects.filter(user=self.request.user)
-
-class AnalysisHistoryDetailView(generics.RetrieveAPIView):
-    """
-    Returns the full details of a single SEO analysis (including AI recommendations).
-    """
-    serializer_class = AnalysisHistorySerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        return AnalysisHistory.objects.filter(user=self.request.user)
-
 from urllib.parse import urlparse
 
+from .serializers import AnalysisHistorySerializer
+from .models import AnalysisHistory, IgnoredRecommendation
+from .services.dashboard_aggregator import DashboardAggregatorService
+
+# --- HELPERS ---
+def get_domain(url):
+    """Extracts the base domain from a URL (e.g., 'example.com')."""
+    if not url: return None
+    url = url if url.startswith(('http://', 'https://')) else f"https://{url}"
+    domain = urlparse(url).netloc
+    return domain.replace('www.', '').lower()
+
+def validate_analysis_access(user, target_url):
+    # If the user doesn't have an integrations profile yet, allow access
+    if not hasattr(user, 'integrations'):
+        return True, ""
+
+    integrations = user.integrations
+    target_domain = get_domain(target_url)
+    
+    has_ga4 = bool(integrations.ga4_property_id or integrations.ga4_access_token)
+    has_github = bool(integrations.github_repo_linked or integrations.github_access_token)
+    
+    # CONDITION 1: If no integrations are linked, user can analyze any site
+    if not (has_ga4 or has_github):
+        return True, ""
+
+    # CONDITION 2: Integrations exist, ensure we have a primary domain locked
+    stored_domain = getattr(integrations, 'primary_domain', None)
+    
+    if not stored_domain:
+        # THE FIX: Lock the integrations to the CURRENT site being analyzed right now,
+        # instead of digging up old test sites from the user's history.
+        integrations.primary_domain = target_domain
+        integrations.save()
+        stored_domain = target_domain
+
+    # CONDITION 3: Block if the target doesn't match the locked domain
+    if stored_domain and target_domain != get_domain(stored_domain):
+        return False, f"Integration active for {stored_domain}. You cannot analyze {target_domain}.|_DOMAIN_|{stored_domain}"
+        
+    return True, ""
+
+
+# --- VIEWS ---
 class DashboardDataView(APIView):
     """
     Returns the aggregated intelligence payload for the dashboard and saves it to history.
@@ -66,34 +62,21 @@ class DashboardDataView(APIView):
         if not url:
             return Response({"error": "URL parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
             
-        # --- DOMAIN OWNERSHIP VERIFICATION ---
-        # Lock the user to the first domain they ever analyzed to prevent cross-data bleed
-        first_history = AnalysisHistory.objects.filter(user=request.user).order_by('created_at').first()
-        if first_history:
-            first_domain = urlparse(first_history.url_analyzed).netloc.replace('www.', '')
+        # 1. GATEKEEPER CHECK (Handles both connected and unconnected states cleanly)
+        allowed, reason = validate_analysis_access(request.user, url)
+        if not allowed:
+            return Response({"error": reason}, status=status.HTTP_403_FORBIDDEN)
             
-            check_url = url
-            if not check_url.startswith(('http://', 'https://')):
-                check_url = f"https://{check_url}"
-                
-            requested_domain = urlparse(check_url).netloc.replace('www.', '')
-            
-            if first_domain and requested_domain and first_domain != requested_domain:
-                return Response({
-                    "error": f"Security Violation: You are only authorized to analyze your registered domain ({first_domain}). Analyzing external domains like {requested_domain} is blocked."
-                }, status=status.HTTP_403_FORBIDDEN)
-        # -------------------------------------
-            
+        # 2. PROCEED WITH ANALYSIS
         aggregator = DashboardAggregatorService(user=request.user)
         try:
             payload = aggregator.build_payload(url)
             
-            # Save or Update History
-            # We use update_or_create to keep history clean if they analyze the same site multiple times in one session
-            # Or we can create a new one every time if preferred. 
-            # Given the user wants "history", maybe a new one if it's been a while?
-            # For now, let's create a NEW entry each time to reflect a true history trail.
-            
+            # --- THE FIX: Inject GitHub connection status into the dashboard data ---
+            has_integrations = hasattr(request.user, 'integrations')
+            payload['is_github_connected'] = bool(has_integrations and request.user.integrations.github_repo_linked)
+            # ------------------------------------------------------------------------
+
             critical_fixes = [item.get('title') for item in payload.get('critical_action_items', [])]
             suggestions = []
             if payload.get('enriched_statistics'):
@@ -118,10 +101,36 @@ class DashboardDataView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class AnalyzeURLView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = AnalysisHistorySerializer(data=request.data)
+        if serializer.is_valid():
+            analysis_record = serializer.save(user=request.user)
+            # run_seo_analysis.delay(analysis_record.id)
+            return Response(
+                {"message": "Analysis started.", "data": serializer.data},
+                status=status.HTTP_202_ACCEPTED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AnalysisHistoryListView(generics.ListAPIView):
+    serializer_class = AnalysisHistorySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return AnalysisHistory.objects.filter(user=self.request.user)
+
+class AnalysisHistoryDetailView(generics.RetrieveAPIView):
+    serializer_class = AnalysisHistorySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return AnalysisHistory.objects.filter(user=self.request.user)
+
 class IgnoreRecommendationView(APIView):
-    """
-    Saves an ignored recommendation so the AI doesn't suggest it again.
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -138,5 +147,4 @@ class IgnoreRecommendationView(APIView):
             file_path=file_path,
             defaults={'explanation': explanation}
         )
-
         return Response({"message": "Recommendation ignored successfully."}, status=status.HTTP_200_OK)

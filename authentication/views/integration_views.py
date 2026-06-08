@@ -2,28 +2,39 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from ..models import UserIntegration
-from ..services.github_service import GitHubService
-from ..services.google_service import GoogleService
 from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings
 
+from ..models import UserIntegration
+from ..services.github_service import GitHubService
+from ..services.google_service import GoogleService
+# Import get_domain from wherever you stored it (assuming analysis.views based on standard structure)
+from analysis.views import get_domain 
+
 class IntegrationStatusView(APIView):
     permission_classes = [IsAuthenticated]
+    
     def get(self, request):
-        try:
+        # 1. THE FIX: Safely check if the integration profile exists using hasattr
+        if hasattr(request.user, 'integrations'):
             integrations = request.user.integrations
             return Response({
                 "github_connected": bool(integrations.github_access_token),
                 "github_repo": integrations.github_repo_linked, 
                 "ga4_connected": bool(integrations.ga4_access_token),
-                "ga4_property": integrations.ga4_property_id or getattr(settings, 'GA4_PROPERTY_ID', None)
+                # 2. THE FIX: Removed getattr(settings) so the UI shows the input box!
+                "ga4_property": integrations.ga4_property_id, 
+                "primary_domain": integrations.primary_domain,
             })
-        except UserIntegration.DoesNotExist:
+        else:
+            # If the user has no integrations connected yet, return clean nulls
             return Response({
-                "github_connected": False, "github_repo": None,
-                "ga4_connected": False, "ga4_property": getattr(settings, 'GA4_PROPERTY_ID', None)
+                "github_connected": False, 
+                "github_repo": None,
+                "ga4_connected": False, 
+                "ga4_property": None,
+                "primary_domain": None
             })
 
 class GA4ExchangeView(APIView):
@@ -95,6 +106,7 @@ class CreateGithubPRView(APIView):
 
         except UserIntegration.DoesNotExist:
             return Response({"error": "GitHub not connected."}, status=status.HTTP_403_FORBIDDEN)
+
 class SaveGithubRepoView(APIView):
     permission_classes = [IsAuthenticated]
     def post(self, request):
@@ -104,6 +116,12 @@ class SaveGithubRepoView(APIView):
         try:
             integration = request.user.integrations
             integration.github_repo_linked = repo_name.strip()
+            
+            # Use the imported get_domain to lock domain correctly
+            url = request.data.get('url')
+            if url:
+                integration.primary_domain = get_domain(url)
+                
             integration.save()
             return Response({"message": "Repo saved!"})
         except UserIntegration.DoesNotExist:
@@ -111,6 +129,7 @@ class SaveGithubRepoView(APIView):
 
 class SaveGA4PropertyView(APIView):
     permission_classes = [IsAuthenticated]
+    
     def post(self, request):
         property_id = request.data.get('property_id')
         if not property_id:
@@ -119,12 +138,19 @@ class SaveGA4PropertyView(APIView):
         try:
             integration = request.user.integrations
             
-            # Test if the property ID is valid
-            from google.analytics.data_v1beta import BetaAnalyticsDataClient
-            from google.analytics.data_v1beta import DateRange, Dimension, Metric, RunReportRequest
-            from google.oauth2.credentials import Credentials
-
+            # 1. Update and save the ID FIRST
+            integration.ga4_property_id = property_id.strip()
+            url = request.data.get('url')
+            if url:
+                integration.primary_domain = get_domain(url)
+            integration.save()
+            
+            # 2. TEST CONNECTION (Optional: Catch errors but don't delete the saved ID)
             try:
+                from google.analytics.data_v1beta import BetaAnalyticsDataClient
+                from google.analytics.data_v1beta import DateRange, Dimension, Metric, RunReportRequest
+                from google.oauth2.credentials import Credentials
+
                 if integration.ga4_access_token:
                     credentials = Credentials(token=integration.ga4_access_token)
                     client = BetaAnalyticsDataClient(credentials=credentials)
@@ -138,11 +164,61 @@ class SaveGA4PropertyView(APIView):
                     date_ranges=[DateRange(start_date="today", end_date="today")],
                 )
                 client.run_report(req)
+                
             except Exception as e:
-                return Response({"error": f"Invalid Property ID or permission denied. Check your GA4 Property ID."}, status=status.HTTP_400_BAD_REQUEST)
+                print(f"DEBUG: Connection test failed: {str(e)}")
+                # We return a message that it saved, but warn the user the connection test failed
+                return Response({
+                    "message": "Property ID saved, but connection test failed.",
+                    "warning": "Check your GA4 permissions or service account."
+                }, status=status.HTTP_200_OK)
 
-            integration.ga4_property_id = property_id.strip()
-            integration.save()
-            return Response({"message": "GA4 Property saved!"})
+            return Response({"message": "GA4 Property saved and verified!"})
+
         except UserIntegration.DoesNotExist:
             return Response({"error": "Google Analytics not connected."}, status=status.HTTP_400_BAD_REQUEST)
+
+class DisconnectIntegrationView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        provider = request.data.get('provider')
+        
+        try:
+            integration = request.user.integrations
+            
+            if provider == 'google':
+                integration.ga4_access_token = None
+                integration.ga4_refresh_token = None
+                integration.ga4_property_id = None 
+            elif provider == 'github':
+                integration.github_access_token = None
+                integration.github_repo_linked = None 
+            else:
+                return Response({"error": "Invalid provider."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # --- THE FIX: Wipe the primary_domain if everything is disconnected ---
+            has_ga4 = bool(integration.ga4_property_id or integration.ga4_access_token)
+            has_github = bool(integration.github_repo_linked or integration.github_access_token)
+            
+            if not has_ga4 and not has_github:
+                integration.primary_domain = None
+            # ----------------------------------------------------------------------
+
+            integration.save()
+            return Response({"message": f"{provider.capitalize()} disconnected successfully."}, status=status.HTTP_200_OK)
+            
+        except UserIntegration.DoesNotExist:
+            return Response({"error": "No integrations found for this user."}, status=status.HTTP_404_NOT_FOUND)
+
+class ResetDomainLockView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        try:
+            integration = request.user.integrations
+            integration.primary_domain = None
+            integration.save()
+            return Response({"message": "Domain lock cleared! Analyzed site reset."}, status=status.HTTP_200_OK)
+        except UserIntegration.DoesNotExist:
+            return Response({"error": "No integrations found."}, status=status.HTTP_404_NOT_FOUND)
