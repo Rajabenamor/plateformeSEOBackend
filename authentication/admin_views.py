@@ -183,8 +183,12 @@ class SuperAdminKPIView(APIView):
         seven_days_ago = now - timedelta(days=7)
 
         # --- 1. EXISTING KPI LOGIC ---
-        total_users = User.objects.count()
-        new_users_week = User.objects.filter(date_joined__gte=seven_days_ago).count()
+        total_users = User.objects.filter(is_staff=False, is_superuser=False).count()
+        new_users_week = User.objects.filter(
+        date_joined__gte=seven_days_ago, 
+        is_staff=False, 
+        is_superuser=False
+        ).count()
         
         total_audits = AnalysisHistory.objects.count()
         avg_seo_score_raw = AnalysisHistory.objects.aggregate(Avg('seo_score'))['seo_score__avg']
