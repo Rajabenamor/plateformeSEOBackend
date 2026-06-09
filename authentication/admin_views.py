@@ -1,4 +1,8 @@
 import logging
+from django.utils import timezone
+from datetime import timedelta
+from django.db.models import Avg , Count
+from django.db.models.functions import TruncDate
 from django.contrib.auth.models import User
 from rest_framework import generics, status
 from rest_framework.permissions import IsAdminUser
@@ -9,8 +13,11 @@ from rest_framework.exceptions import ValidationError, PermissionDenied # FIXED:
 from .serializers import UserSerializer , UserUpdateSerializer
 from django.core.mail import EmailMessage
 from django.conf import settings
-
+from authentication.models import UserIntegration
+from analysis.models import AnalysisHistory, IgnoredRecommendation
+from django.contrib.auth import get_user_model
 logger = logging.getLogger(__name__)
+User = get_user_model()
 
 class UserListView(generics.ListAPIView):
     permission_classes = [IsAdminUser]
@@ -167,3 +174,56 @@ class UserUpdateView(generics.UpdateAPIView):
         
         serializer.save()
         logger.info(f"Admin '{self.request.user.username}' updated '{instance.username}'")
+
+class SuperAdminKPIView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        now = timezone.now()
+        seven_days_ago = now - timedelta(days=7)
+
+        # --- 1. EXISTING KPI LOGIC ---
+        total_users = User.objects.count()
+        new_users_week = User.objects.filter(date_joined__gte=seven_days_ago).count()
+        
+        total_audits = AnalysisHistory.objects.count()
+        avg_seo_score_raw = AnalysisHistory.objects.aggregate(Avg('seo_score'))['seo_score__avg']
+        avg_seo_score = round(avg_seo_score_raw, 1) if avg_seo_score_raw else 0
+
+        ga4_count = UserIntegration.objects.exclude(ga4_access_token__isnull=True).exclude(ga4_access_token__exact='').count()
+        github_count = UserIntegration.objects.exclude(github_repo_linked__isnull=True).exclude(github_repo_linked__exact='').count()
+        ignored_fixes = IgnoredRecommendation.objects.count()
+
+        # --- 2. NEW LINE CHART DATA LOGIC ---
+        # Generate the last 7 dates
+        dates = [(now - timedelta(days=i)).date() for i in range(6, -1, -1)]
+
+        # Get daily counts using TruncDate
+        users_by_date = User.objects.filter(date_joined__gte=seven_days_ago) \
+            .annotate(date=TruncDate('date_joined')) \
+            .values('date') \
+            .annotate(count=Count('id'))
+
+        audits_by_date = AnalysisHistory.objects.filter(created_at__gte=seven_days_ago) \
+            .annotate(date=TruncDate('created_at')) \
+            .values('date') \
+            .annotate(count=Count('id'))
+
+        # Format into a clean array for the frontend chart
+        chart_data = []
+        for d in dates:
+            u_count = next((item['count'] for item in users_by_date if item['date'] == d), 0)
+            a_count = next((item['count'] for item in audits_by_date if item['date'] == d), 0)
+            chart_data.append({
+                "name": d.strftime("%b %d"), # e.g., "Jun 09"
+                "New Users": u_count,
+                "Audits Run": a_count
+            })
+
+        return Response({
+            "users": {"total": total_users, "new_this_week": new_users_week},
+            "audits": {"total": total_audits, "avg_score": avg_seo_score},
+            "integrations": {"ga4": ga4_count, "github": github_count},
+            "feedback": {"ignored_fixes": ignored_fixes},
+            "chart_data": chart_data # <-- Sending the chart data
+        })
