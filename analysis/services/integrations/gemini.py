@@ -126,7 +126,8 @@ class GeminiService:
             HTML Structure (Trimmed for context):
             {raw_html[:10000] if raw_html else "No HTML data available"}
 
-            CRITICAL: For every single action item, you MUST provide 'current_code' (the exact existing snippet) and 'suggested_code' (the exact replacement). 
+            CRITICAL: -For every single action item, you MUST provide 'current_code' (the exact existing snippet) and 'suggested_code' (the exact replacement). 
+            -For every SEO fix you generate, you MUST provide a concrete code example in the code_fix field. This field cannot be empty or null. If the fix requires a structural change, provide the exact HTML or React JSX snippet that resolves the issue.
             """
 
             # Force native JSON mode to eliminate markdown backticks
