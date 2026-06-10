@@ -198,7 +198,18 @@ class GitHubService:
             snippet_context = f"\n\nHere is a suggested code snippet to help you fix it:\n```tsx\n{suggested_code}\n```" if suggested_code else ""
 
             prompt = f"""
-            You are an expert Next.js/React developer.
+            You are an elite Next.js/React developer.
+           
+
+            ### STRICT NEXT.JS & TYPESCRIPT FRAMEWORK RULES
+            1. Never guess or hallucinate object properties for framework-specific types. 
+            2. When modifying Next.js page or layout metadata:
+               - The 'Metadata' object ONLY accepts valid Next.js properties (e.g., title, description, openGraph, twitter, robots, icons).
+               - DO NOT invent a 'links' array or inject raw HTML properties into the metadata object.
+            3. For Resource Hints (preconnect, dns-prefetch, preload, prefetch):
+               - Never place them in the metadata object.
+               - Instead, place standard HTML <link> tags directly inside the server-rendered root layout template (app/layout.tsx) inside the <head> tags
+            
             I need to fix the following SEO issue in the code:
             Issue: {title}
             Details: {explanation}{snippet_context}
@@ -265,7 +276,30 @@ class GitHubService:
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel('gemini-2.5-flash')
             snippet_context = f"\n\nHere is a suggested code snippet to help you fix it:\n```tsx\n{suggested_code}\n```" if suggested_code else ""
-            prompt = f"Fix SEO issue '{title}' ({explanation}){snippet_context} in this file:\n{source_code}\n\nReturn ONLY the fixed code."
+            prompt =f"""
+            You are an expert Next.js/React developer.
+
+            ### STRICT NEXT.JS & TYPESCRIPT FRAMEWORK RULES
+            1. Never guess or hallucinate object properties for framework-specific types. 
+            2. When modifying Next.js page or layout metadata:
+               - The 'Metadata' object ONLY accepts valid Next.js properties (e.g., title, description, openGraph, twitter, robots, icons).
+               - DO NOT invent a 'links' array or inject raw HTML properties into the metadata object.
+            3. For Resource Hints (preconnect, dns-prefetch, preload, prefetch):
+               - Never place them in the metadata object.
+               - Instead, place standard HTML <link> tags directly inside the server-rendered root layout template (app/layout.tsx) inside the <head> tags.
+
+            I need to fix the following SEO issue in the code:
+            Issue: {title}
+            Details: {explanation}{snippet_context}
+
+            Here is the EXACT source code of `{file_path}`:
+            ```tsx
+            {source_code}
+            ```
+
+            Rewrite the file to fix the SEO issue. 
+            CRITICAL: Return ONLY the raw, updated code. Do NOT include markdown blocks. Do NOT include text explanations.
+            """
             response = model.generate_content(prompt)
             if not response.text: return None, "AI blocked."
             fixed_code = response.text.strip()
