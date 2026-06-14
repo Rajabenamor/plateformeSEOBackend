@@ -121,7 +121,7 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.JSONParser',
     ),
 }
-
+CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
 FRONTEND_URL ="http://localhost:3000"
 

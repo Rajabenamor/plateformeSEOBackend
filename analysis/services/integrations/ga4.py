@@ -1,5 +1,8 @@
 import os
 import datetime
+import requests
+from django.conf import settings
+from django.utils import timezone
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import (
     DateRange,
@@ -7,24 +10,30 @@ from google.analytics.data_v1beta.types import (
     Metric,
     RunReportRequest,
 )
-
 from google.oauth2.credentials import Credentials
 
 class GA4Service:
     """
     Service to interact with the Google Analytics 4 API.
-    Uses the credentials file specified in GOOGLE_APPLICATION_CREDENTIALS.
+    Handles automatic OAuth2 token refreshing via the UserIntegration model.
     """
     
-    def __init__(self, property_id=None, access_token=None):
-        self.property_id = property_id or os.environ.get("GA4_PROPERTY_ID")
-        self.access_token = access_token
+    def __init__(self, user_integration=None, property_id=None, access_token=None):
+        # 1. Determine Property ID and get a guaranteed valid token
+        if user_integration:
+            self.property_id = user_integration.ga4_property_id
+            self.access_token = self._get_valid_token(user_integration)
+        else:
+            # Fallback for manual overrides or server-to-server credentials
+            self.property_id = property_id or os.environ.get("GA4_PROPERTY_ID")
+            self.access_token = access_token
         
         if not self.property_id:
             print("WARNING: GA4_PROPERTY_ID is not set. Real GA4 data will fail.")
             self.client = None
             return
             
+        # 2. Initialize the client with the valid token
         try:
             if self.access_token:
                 credentials = Credentials(token=self.access_token)
@@ -34,6 +43,41 @@ class GA4Service:
         except Exception as e:
             print(f"Failed to initialize GA4 Client. Error: {e}")
             self.client = None
+
+    def _get_valid_token(self, integration):
+        """
+        Checks if the token is expired. If so, uses the refresh token to get 
+        a new access token and saves it to the database.
+        """
+        if not integration.ga4_access_token:
+            return None
+
+        # If token is expired or expires in the next 5 mins, refresh it
+        if not integration.ga4_token_expiry or integration.ga4_token_expiry <= timezone.now() + timezone.timedelta(minutes=5):
+            
+            if not integration.ga4_refresh_token:
+                print("ERROR: Token expired but no refresh token available.")
+                return None
+                
+            print("Refreshing GA4 Access Token...")
+            response = requests.post('https://oauth2.googleapis.com/token', data={
+                'client_id': settings.GOOGLE_CLIENT_ID, # Ensure this is in your settings.py
+                'client_secret': settings.CLIENT_SECRET, # Ensure this is in your settings.py
+                'refresh_token': integration.ga4_refresh_token,
+                'grant_type': 'refresh_token'
+            }, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                integration.ga4_access_token = data['access_token']
+                # Google returns 'expires_in' in seconds (usually 3599)
+                integration.ga4_token_expiry = timezone.now() + timezone.timedelta(seconds=data['expires_in'])
+                integration.save()
+            else:
+                print(f"Failed to refresh GA4 token: {response.text}")
+                return None
+
+        return integration.ga4_access_token
 
     def get_traffic_last_30_days(self) -> list[dict]:
         """
@@ -108,16 +152,8 @@ class GA4Service:
     def get_fading_content(self) -> list[dict]:
         """
         Identify URLs where traffic has dropped significantly.
-        (A simplified version of 'Traffic Decay Alert')
         """
         if not self.client or not self.property_id:
             return []
             
-        # To accurately find decaying content, we'd compare two date ranges
-        # For simplicity in this demo, let's just look at top pages last 30 days
-        # In a full implementation, we would run two reports (30-60 days ago vs 0-30 days ago)
-        # and calculate the delta per URL.
-        
-        # For now, returning an empty list so the mock aggregator falls back to generating a fake one
-        # or we could implement the full complex query. Let's return empty to keep the example focused.
         return []
